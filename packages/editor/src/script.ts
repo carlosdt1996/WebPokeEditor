@@ -1,6 +1,8 @@
+import type { Engine } from "./engine";
+
 /** Mini-lenguaje de eventos para NPCs: una orden por línea. Se compila a instrucciones y se ejecuta de forma asíncrona. */
 
-export type Item = "ball" | "potion";
+export type Item = string;
 export type Instr =
   | { op: "say"; text: string }
   | { op: "give"; item: Item; n: number }
@@ -14,7 +16,7 @@ export type Instr =
   | { op: "warp"; map: string; x: number; y: number };
 
 export const SCRIPT_HELP = `say <texto>            muestra un mensaje (varias líneas seguidas = un cuadro por línea)
-give ball|potion <n>   da objetos
+give <objeto> <n>      da objetos (ids de la pestaña Datos: potion, ball...)
 heal                   cura al equipo
 flag <nombre>          activa una marca  ·  unflag <nombre> la quita
 if <marca> / ifnot <marca> ... else ... end
@@ -40,7 +42,7 @@ export function parseScript(src: string): ParseResult {
       case "say": if (!arg) err("say necesita un texto"); else code.push({ op: "say", text: arg }); break;
       case "give": {
         const n = int(rest[1]);
-        if ((rest[0] !== "ball" && rest[0] !== "potion") || !(n >= 1)) err("uso: give ball|potion <n>");
+        if (!rest[0] || !(n >= 1)) err("uso: give <objeto> <n>");
         else code.push({ op: "give", item: rest[0], n });
         break;
       }
@@ -90,34 +92,55 @@ export interface ScriptCtx {
   say(lines: string[]): Promise<void>;
   give(item: Item, n: number): void;
   heal(): void;
-  has(flag: string): boolean;
-  set(flag: string, on: boolean): void;
   battle(species: string, level: number): Promise<void>;
   givemon(species: string, level: number): void;
   warp(map: string, x: number, y: number): Promise<void>;
 }
 
-export async function runScript(code: Instr[], ctx: ScriptCtx, maxSteps = 5000) {
-  let pc = 0, steps = 0;
-  while (pc < code.length && steps++ < maxSteps) {
-    const ins = code[pc];
+/** Códigos de operación del bytecode (deben coincidir con crates/engine-core). */
+const OP = { say: 1, give: 2, heal: 3, battle: 4, givemon: 5, warp: 6, flag: 10, unflag: 11, jif: 12, jmp: 13 } as const;
+
+/** Compila las instrucciones a bytecode de 4 palabras + tablas de cadenas (la VM solo maneja números). */
+export function compileScript(code: Instr[], engine: Pick<Engine, "flagId">): { words: Uint32Array; strings: string[] } {
+  const strings: string[] = [];
+  const sid = (t: string) => { let i = strings.indexOf(t); if (i < 0) i = strings.push(t) - 1; return i; };
+  const words = new Uint32Array(code.length * 4);
+  code.forEach((ins, i) => {
+    let w: number[];
     switch (ins.op) {
-      case "say": {
-        const lines: string[] = [];
-        while (pc < code.length && code[pc].op === "say") lines.push((code[pc++] as Extract<Instr, { op: "say" }>).text);
-        await ctx.say(lines);
-        continue;
-      }
-      case "give": ctx.give(ins.item, ins.n); break;
-      case "heal": ctx.heal(); break;
-      case "flag": ctx.set(ins.name, true); break;
-      case "unflag": ctx.set(ins.name, false); break;
-      case "jif": if (ctx.has(ins.flag) === ins.neg) { pc = ins.to; continue; } break;
-      case "jmp": pc = ins.to; continue;
-      case "battle": await ctx.battle(ins.species, ins.level); break;
-      case "givemon": ctx.givemon(ins.species, ins.level); break;
-      case "warp": await ctx.warp(ins.map, ins.x, ins.y); return; // el mapa cambia: termina el script
+      case "say": w = [OP.say, sid(ins.text), 0, 0]; break;
+      case "give": w = [OP.give, sid(ins.item), ins.n, 0]; break;
+      case "heal": w = [OP.heal, 0, 0, 0]; break;
+      case "flag": w = [OP.flag, engine.flagId(ins.name), 0, 0]; break;
+      case "unflag": w = [OP.unflag, engine.flagId(ins.name), 0, 0]; break;
+      case "jif": w = [OP.jif, engine.flagId(ins.flag), ins.neg ? 1 : 0, ins.to]; break;
+      case "jmp": w = [OP.jmp, ins.to, 0, 0]; break;
+      case "battle": w = [OP.battle, sid(ins.species), ins.level, 0]; break;
+      case "givemon": w = [OP.givemon, sid(ins.species), ins.level, 0]; break;
+      case "warp": w = [OP.warp, sid(ins.map), ins.x, ins.y]; break;
     }
-    pc++;
+    words.set(w, i * 4);
+  });
+  return { words, strings };
+}
+
+/** Ejecuta un script en la VM de Rust; el host (ctx) resuelve los efectos y la VM decide el flujo. */
+export async function runScript(code: Instr[], ctx: ScriptCtx, engine: Engine) {
+  const { words, strings } = compileScript(code, engine);
+  engine.vmLoad(words);
+  let lines: string[] = [];
+  const flush = async () => { if (lines.length) { const l = lines; lines = []; await ctx.say(l); } };
+  for (;;) {
+    const ev = engine.vmRun();
+    if (ev === OP.say) { lines.push(strings[engine.vmArg(0)]); continue; }
+    await flush();
+    if (ev === 0) return;
+    if (ev === 255) throw new Error("Error en la VM de scripts");
+    const a = engine.vmArg(0), b = engine.vmArg(1), c = engine.vmArg(2);
+    if (ev === OP.give) ctx.give(strings[a], b);
+    else if (ev === OP.heal) ctx.heal();
+    else if (ev === OP.battle) await ctx.battle(strings[a], b);
+    else if (ev === OP.givemon) ctx.givemon(strings[a], b);
+    else if (ev === OP.warp) { await ctx.warp(strings[a], b, c); return; } // el mapa cambia: termina el script
   }
 }

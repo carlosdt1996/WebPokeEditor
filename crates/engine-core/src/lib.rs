@@ -21,6 +21,11 @@ pub const T_DOOR: u8 = 8;
 pub const T_FLOOR: u8 = 9;
 pub const T_CARPET: u8 = 10;
 pub const T_COUNTER: u8 = 11;
+/// Objetos (capa superior, 0 = vacío): 12 árbol, 13 mata, 14 flor, 15 roca, 16 valla, 17 cartel.
+pub const O_TREE: u8 = 12;
+pub const O_ROCK: u8 = 15;
+pub const O_FENCE: u8 = 16;
+pub const O_SIGN: u8 = 17;
 
 pub const IN_UP: u32 = 1;
 pub const IN_DOWN: u32 = 2;
@@ -39,6 +44,8 @@ pub struct State {
     w: usize,
     h: usize,
     tiles: [u8; MAX_DIM * MAX_DIM],
+    /// Capa de objetos (decoración con colisión propia); 0 = sin objeto.
+    objects: [u8; MAX_DIM * MAX_DIM],
     /// Celdas ocupadas por entidades (NPCs); el host las mantiene.
     blockers: [u8; MAX_DIM * MAX_DIM],
     x: i32,
@@ -57,6 +64,7 @@ impl State {
             w: 20,
             h: 15,
             tiles: [0; MAX_DIM * MAX_DIM],
+            objects: [0; MAX_DIM * MAX_DIM],
             blockers: [0; MAX_DIM * MAX_DIM],
             x: 0,
             y: 0,
@@ -74,6 +82,7 @@ impl State {
         self.h = h.clamp(1, MAX_DIM);
         self.tiles = [0; MAX_DIM * MAX_DIM];
         self.blockers = [0; MAX_DIM * MAX_DIM];
+        self.objects = [0; MAX_DIM * MAX_DIM];
         self.rng = seed ^ 0x9E37_79B9_7F4A_7C15;
         if self.rng == 0 {
             self.rng = 1;
@@ -115,7 +124,8 @@ impl State {
         if x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 {
             return false;
         }
-        !is_solid(self.tiles[y as usize * self.w + x as usize]) && self.blockers[y as usize * self.w + x as usize] == 0
+        let i = y as usize * self.w + x as usize;
+        !is_solid(self.tiles[i]) && !is_solid(self.objects[i]) && self.blockers[i] == 0
     }
 
     /// xorshift64*: determinista y suficiente para el gameplay.
@@ -183,7 +193,7 @@ impl Default for State {
 }
 
 pub fn is_solid(t: u8) -> bool {
-    matches!(t, T_WATER | T_TREE | T_WALL | T_COUNTER)
+    matches!(t, T_WATER | T_TREE | T_WALL | T_COUNTER | O_TREE | O_ROCK | O_FENCE | O_SIGN)
 }
 
 /// Daño Gen 3-like. `mult_x100` combina STAB y efectividad (100 = neutro);
@@ -220,6 +230,10 @@ pub extern "C" fn engine_reset(w: u32, h: u32, seed: u32) {
 #[no_mangle]
 pub extern "C" fn engine_tiles_ptr() -> *mut u8 {
     st().tiles.as_mut_ptr()
+}
+#[no_mangle]
+pub extern "C" fn engine_objects_ptr() -> *mut u8 {
+    st().objects.as_mut_ptr()
 }
 #[no_mangle]
 pub extern "C" fn engine_width() -> u32 {
@@ -300,6 +314,117 @@ pub extern "C" fn engine_is_solid(t: u32) -> u32 {
 #[no_mangle]
 pub extern "C" fn engine_damage(level: u32, power: u32, atk: u32, def: u32, mult_x100: u32, roll: u32) -> u32 {
     damage(level, power, atk, def, mult_x100, roll)
+}
+
+// ---------------------------------------------------------------------------
+// VM de scripts: ejecuta bytecode de 4 palabras por instrucción (op, a, b, c).
+// Cede el control (yield) en cada operación con efecto en el host; el host
+// responde y vuelve a llamar a `vm_run`. Las marcas viven aquí (estado del juego).
+// ---------------------------------------------------------------------------
+
+pub const VM_MAX_INSTR: usize = 1024;
+pub const VM_FLAGS: usize = 256;
+pub const VM_SAY: u32 = 1;
+pub const VM_GIVE: u32 = 2;
+pub const VM_HEAL: u32 = 3;
+pub const VM_BATTLE: u32 = 4;
+pub const VM_GIVEMON: u32 = 5;
+pub const VM_WARP: u32 = 6;
+pub const VM_ERR: u32 = 255;
+
+const OP_FLAG: u32 = 10;
+const OP_UNFLAG: u32 = 11;
+const OP_JIF: u32 = 12;
+const OP_JMP: u32 = 13;
+
+pub struct Vm {
+    code: [u32; VM_MAX_INSTR * 4],
+    len: usize,
+    pc: usize,
+    flags: [u8; VM_FLAGS],
+    args: [u32; 3],
+}
+
+impl Vm {
+    pub const fn new() -> Self {
+        Vm { code: [0; VM_MAX_INSTR * 4], len: 0, pc: 0, flags: [0; VM_FLAGS], args: [0; 3] }
+    }
+    pub fn load(&mut self, n_instr: usize) {
+        self.len = n_instr.min(VM_MAX_INSTR);
+        self.pc = 0;
+    }
+    /// Ejecuta hasta el siguiente evento del host. 0 = fin del script.
+    pub fn run(&mut self) -> u32 {
+        let mut guard = 0;
+        while self.pc < self.len {
+            guard += 1;
+            if guard > 100_000 {
+                return VM_ERR;
+            }
+            let i = self.pc * 4;
+            let (op, a, b, c) = (self.code[i], self.code[i + 1], self.code[i + 2], self.code[i + 3]);
+            self.pc += 1;
+            match op {
+                VM_SAY | VM_GIVE | VM_HEAL | VM_BATTLE | VM_GIVEMON | VM_WARP => {
+                    self.args = [a, b, c];
+                    return op;
+                }
+                OP_FLAG => self.flags[(a as usize) % VM_FLAGS] = 1,
+                OP_UNFLAG => self.flags[(a as usize) % VM_FLAGS] = 0,
+                // a = marca, b = 1 si es negado, c = destino
+                OP_JIF => {
+                    if (self.flags[(a as usize) % VM_FLAGS] == 1) == (b == 0) {
+                        // condición cumplida: continúa
+                    } else {
+                        self.pc = c as usize;
+                    }
+                }
+                OP_JMP => self.pc = a as usize,
+                _ => return VM_ERR,
+            }
+        }
+        0
+    }
+}
+
+struct GlobalVm(UnsafeCell<Vm>);
+// SAFETY: igual que `Global`: WASM de un solo hilo.
+unsafe impl Sync for GlobalVm {}
+static V: GlobalVm = GlobalVm(UnsafeCell::new(Vm::new()));
+
+#[allow(clippy::mut_from_ref)]
+fn vm() -> &'static mut Vm {
+    // SAFETY: ver `unsafe impl Sync`.
+    unsafe { &mut *V.0.get() }
+}
+
+#[no_mangle]
+pub extern "C" fn vm_code_ptr() -> *mut u32 {
+    vm().code.as_mut_ptr()
+}
+#[no_mangle]
+pub extern "C" fn vm_load(n_instr: u32) {
+    vm().load(n_instr as usize);
+}
+#[no_mangle]
+pub extern "C" fn vm_run() -> u32 {
+    vm().run()
+}
+#[no_mangle]
+pub extern "C" fn vm_arg(i: u32) -> u32 {
+    vm().args[(i as usize).min(2)]
+}
+#[no_mangle]
+pub extern "C" fn vm_flag_get(id: u32) -> u32 {
+    vm().flags[(id as usize) % VM_FLAGS] as u32
+}
+#[no_mangle]
+pub extern "C" fn vm_flag_set(id: u32, on: u32) {
+    vm().flags[(id as usize) % VM_FLAGS] = (on != 0) as u8;
+}
+#[no_mangle]
+pub extern "C" fn vm_flags_reset() {
+    vm().flags = [0; VM_FLAGS];
 }
 
 #[cfg(test)]
@@ -388,5 +513,51 @@ mod tests {
         assert_eq!(damage(50, 40, 100, 100, 0, 100), 0);
         assert_eq!(damage(50, 0, 100, 100, 100, 100), 0);
         assert!(damage(50, 40, 100, 100, 100, 85) < damage(50, 40, 100, 100, 100, 100));
+    }
+
+    #[test]
+    fn objects_layer_blocks_but_grass_encounters_use_ground() {
+        let mut s = State::new();
+        s.reset(5, 5, 1);
+        s.set_spawn(1, 1);
+        s.objects[1 * 5 + 2] = O_FENCE;
+        assert!(!s.walkable(2, 1));
+        s.objects[1 * 5 + 2] = 14; // flor: decorativa
+        assert!(s.walkable(2, 1));
+        s.reset(5, 5, 1);
+        assert!(s.walkable(2, 1));
+    }
+
+    #[test]
+    fn vm_branches_flags_and_yields() {
+        let mut v = Vm::new();
+        // 0: JIF flag0 (no negado) -> 4 ; 1: SAY 7 ; 2: FLAG 0 ; 3: JMP 5 ; 4: SAY 9 ; 5: HEAL
+        let prog: [[u32; 4]; 6] = [
+            [OP_JIF, 0, 0, 4],
+            [VM_SAY, 7, 0, 0],
+            [OP_FLAG, 0, 0, 0],
+            [OP_JMP, 5, 0, 0],
+            [VM_SAY, 9, 0, 0],
+            [VM_HEAL, 0, 0, 0],
+        ];
+        for (i, w) in prog.iter().enumerate() {
+            v.code[i * 4..i * 4 + 4].copy_from_slice(w);
+        }
+        v.load(6);
+        // marca apagada: salta a la rama else (SAY 9)
+        assert_eq!(v.run(), VM_SAY);
+        assert_eq!(v.args[0], 9);
+        assert_eq!(v.run(), VM_HEAL);
+        assert_eq!(v.run(), 0);
+        // marca activada: rama then (SAY 7), que activa la marca y salta al final
+        v.flags[0] = 1;
+        v.load(6);
+        assert_eq!(v.run(), VM_SAY);
+        assert_eq!(v.args[0], 7);
+        assert_eq!(v.run(), VM_HEAL);
+        assert_eq!(v.run(), 0);
+        v.code[0] = 99; // opcode inválido
+        v.load(1);
+        assert_eq!(v.run(), VM_ERR);
     }
 }

@@ -17,7 +17,24 @@ export const TILE_DEFS = [
   { id: 9, name: "Suelo", solid: false },
   { id: 10, name: "Alfombra", solid: false },
   { id: 11, name: "Mostrador", solid: true },
+  // Capa de objetos (decoración con transparencia sobre el suelo)
+  { id: 12, name: "Árbol (obj.)", solid: true },
+  { id: 13, name: "Mata (obj.)", solid: false },
+  { id: 14, name: "Flor (obj.)", solid: false },
+  { id: 15, name: "Roca", solid: true },
+  { id: 16, name: "Valla", solid: true },
+  { id: 17, name: "Cartel", solid: true },
 ] as const;
+
+/** Id de tile ≥ 12 → capa de objetos; el resto, suelo. 255 = "quitar objeto" (solo editor). */
+export const OBJECT_MIN = 12;
+export const ERASE_OBJECT = 255;
+/** Celda del atlas para cada id de tile. */
+export const atlasIndex = (id: number) => (id < OBJECT_MIN ? id : 32 + (id - OBJECT_MIN));
+/** Fotograma alternativo (celda del atlas) de tiles de suelo animados. */
+export const TILE_ANIM: Record<number, number> = { 3: 38, 1: 39 };
+/** Milisegundos por fotograma de animación. */
+export const ANIM_MS = 450;
 
 /** Altura 3D (en tiles) de cada tipo de tile para el modo 3D. */
 export const TILE_HEIGHT: Record<number, number> = { 3: -0.25, 5: 1.2, 11: 0.7 };
@@ -30,6 +47,9 @@ export const NPC_LOOKS = 4;
 export const BB_TREE = 32;
 export const BB_TUFT = 33;
 export const BB_FLOWER = 34;
+export const BB_ROCK = 35;
+export const BB_FENCE = 36;
+export const BB_SIGN = 37;
 
 function rng(seed: number) {
   let s = seed >>> 0 || 1;
@@ -107,6 +127,19 @@ export function createAtlas(): HTMLCanvasElement {
   for (let d = 0; d < 4; d++) drawPerson(px, PLAYER_SPRITE + d, d, "#e53935", "#2a5bd7", "#2b2b45");
   const looks: [string, string, string][] = [["#6a1b9a", "#9c27b0", "#37474f"], ["#2e7d32", "#f9a825", "#4e342e"], ["#455a64", "#e0e0e0", "#263238"], ["#ef6c00", "#ffffff", "#5d4037"]];
   looks.forEach(([hat, shirt, pants], l) => { for (let d = 0; d < 4; d++) drawPerson(px, NPC_SPRITE + l * 4 + d, d, hat, shirt, pants); });
+  // Fotogramas alternativos animados: 38 agua, 39 hierba alta ondulada
+  fill(38, "#3d7be0"); noise(38, 45, ["#4a8ae8", "#3569c6"], 24);
+  for (let k = 0; k < 3; k++) px(38, 5 + k * 4 - (k % 2) * 3, 3 + k * 5, "#a8ccff", 4, 1);
+  fill(39, "#4a9e3f"); noise(39, 23, ["#3a8a33"], 20);
+  for (let k = 0; k < 4; k++) for (let j = 0; j < 4; j++) {
+    const x = k * 4 + 2, y = j * 4 + 1;
+    px(39, x, y + 2, "#2f7a2b"); px(39, x - 1, y + 1, "#2f7a2b"); px(39, x - 2, y, "#8ee07a"); px(39, x, y, "#2f7a2b", 1, 3);
+  }
+  // Objetos transparentes: 35 roca, 36 valla, 37 cartel
+  for (const [x, y, w, hh, col] of [[3, 8, 10, 6, "#8d8d8d"], [4, 6, 8, 3, "#a6a6a6"], [3, 13, 10, 1, "#6d6d6d"], [5, 7, 2, 1, "#c8c8c8"]] as const) px(BB_ROCK, x, y, col, w, hh);
+  for (const [x, y, w, hh, col] of [[0, 8, 16, 2, "#a9763e"], [0, 12, 16, 2, "#a9763e"], [1, 5, 2, 10, "#c9955a"], [7, 5, 2, 10, "#c9955a"], [13, 5, 2, 10, "#c9955a"]] as const) px(BB_FENCE, x, y, col, w, hh);
+  px(BB_SIGN, 7, 9, "#7a4a22", 2, 6); px(BB_SIGN, 2, 3, "#c9955a", 12, 7); px(BB_SIGN, 2, 3, "#7a4a22", 12, 1); px(BB_SIGN, 2, 9, "#7a4a22", 12, 1);
+  px(BB_SIGN, 4, 5, "#5a3a20", 8, 1); px(BB_SIGN, 4, 7, "#5a3a20", 6, 1);
   // Billboards 3D (transparentes)
   g.fillStyle = "#7a4a22"; g.fillRect((BB_TREE % ATLAS_COLS) * TILE + 6, Math.floor(BB_TREE / ATLAS_COLS) * TILE + 10, 4, 6);
   for (const [cx, cy, r, col] of [[8, 6, 6.5, "#2a7a2e"], [6, 4.5, 3.5, "#38983c"], [10.5, 8, 3, "#256d29"]] as const) {

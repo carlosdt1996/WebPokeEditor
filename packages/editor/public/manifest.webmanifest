@@ -1,0 +1,15 @@
+{
+  "name": "WebPokeEditor — Creador de fangames",
+  "short_name": "WebPokeEditor",
+  "description": "Editor de fangames en el navegador (Rust/WASM + WebGPU)",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#12141c",
+  "theme_color": "#e53935",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

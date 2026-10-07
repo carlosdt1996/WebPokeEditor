@@ -7,13 +7,14 @@ import { type GameMap, type Npc, type Project, decodeTiles, encodeTiles, uniqueI
 import { createRenderer, type Renderer } from "./renderer";
 import { MAX_INSTANCES } from "./renderer/types";
 import { type Cam3D, type Entity3D, Renderer3D } from "./renderer3d";
-import { NPC_SPRITE, PLAYER_SPRITE, TILE, TILE_DEFS } from "./tiles";
+import { ANIM_MS, ERASE_OBJECT, NPC_SPRITE, OBJECT_MIN, PLAYER_SPRITE, TILE, TILE_ANIM, TILE_DEFS, TILE_HEIGHT, atlasIndex } from "./tiles";
 import { runBattleUi } from "./ui/battleUi";
 
-export type Tool = "paint" | "fill" | "pick" | "spawn" | "npc" | "warp";
+export type Tool = "paint" | "fill" | "pick" | "spawn" | "npc" | "warp" | "raise" | "lower";
 export type Selection = { kind: "npc" | "warp"; index: number } | null;
 
-interface Edit { idx: number; from: number; to: number }
+/** layer: 0 suelo, 1 objetos, 2 alturas */
+interface Edit { layer: 0 | 1 | 2; idx: number; from: number; to: number }
 
 export class MapView {
   readonly el = h("div", { class: "viewport" });
@@ -21,6 +22,7 @@ export class MapView {
   tile = 1;
   showSolid = false;
   showGrid = true;
+  showHeights = false;
   playing = false;
   mode3d = false;
   selection: Selection = null;
@@ -37,6 +39,7 @@ export class MapView {
   private r3d?: Renderer3D;
   private atlas?: HTMLCanvasElement;
   private world3dDirty = true;
+  private heights = new Int8Array(0);
   private cam3: Cam3D = { x: 0, z: 0, yaw: 0, pitch: 0.95, dist: 9 };
   private overlay = h("canvas", { class: "overlay" });
   private dialogEl = h("div", { class: "dialog", hidden: true });
@@ -50,6 +53,7 @@ export class MapView {
   private undo: Edit[][] = [];
   private redo: Edit[][] = [];
   private stroke: Map<number, Edit> | null = null;
+  private visited = new Set<number>();
   private pan: { x: number; y: number; cx: number; cy: number } | null = null;
   private orbit: { x: number; y: number; yaw: number; pitch: number } | null = null;
   private spaceDown = false;
@@ -110,7 +114,9 @@ export class MapView {
   private loadIntoEngine(index: number, runtime: boolean, x?: number, y?: number) {
     const m = this.project.maps[index];
     this.curIndex = index;
-    this.engine.loadMap(m.w, m.h, decodeTiles(m.tiles, m.w * m.h), this.project.seed);
+    this.engine.loadMap(m.w, m.h, decodeTiles(m.tiles, m.w * m.h), this.project.seed, m.objects ? decodeTiles(m.objects, m.w * m.h) : undefined);
+    this.heights = new Int8Array(m.w * m.h);
+    if (m.heights) { const raw = decodeTiles(m.heights, m.w * m.h); for (let i = 0; i < raw.length; i++) this.heights[i] = raw[i] - 128; }
     this.engine.clearBlockers();
     if (runtime) for (const n of m.npcs) this.engine.setBlocker(n.x, n.y);
     const s = this.project.start;
@@ -125,16 +131,25 @@ export class MapView {
     if (!m) return;
     m.w = this.engine.width; m.h = this.engine.height;
     m.tiles = encodeTiles(this.engine.tiles);
+    const objs = this.engine.objects;
+    m.objects = objs.some((v) => v) ? encodeTiles(objs) : undefined;
+    m.heights = this.heights.some((v) => v) ? encodeTiles(Uint8Array.from(this.heights, (v) => v + 128)) : undefined;
   }
 
   resizeMap(w: number, hh: number) {
     this.commit();
     const m = this.map;
     const ow = m.w, oh = m.h;
-    const old = decodeTiles(m.tiles, ow * oh);
-    const next = new Uint8Array(w * hh);
-    for (let y = 0; y < Math.min(oh, hh); y++) for (let x = 0; x < Math.min(ow, w); x++) next[y * w + x] = old[y * ow + x];
-    m.w = w; m.h = hh; m.tiles = encodeTiles(next);
+    const resize = (b64: string | undefined, fillV: number) => {
+      const old = b64 ? decodeTiles(b64, ow * oh) : new Uint8Array(ow * oh).fill(fillV);
+      const next = new Uint8Array(w * hh).fill(fillV);
+      for (let y = 0; y < Math.min(oh, hh); y++) for (let x = 0; x < Math.min(ow, w); x++) next[y * w + x] = old[y * ow + x];
+      return next;
+    };
+    const objs = resize(m.objects, 0), hs = resize(m.heights, 128);
+    m.w = w; m.h = hh; m.tiles = encodeTiles(resize(m.tiles, 0));
+    m.objects = objs.some((v) => v) ? encodeTiles(objs) : undefined;
+    m.heights = hs.some((v) => v !== 128) ? encodeTiles(hs) : undefined;
     m.npcs = m.npcs.filter((n) => n.x < w && n.y < hh);
     m.warps = m.warps.filter((k) => k.x < w && k.y < hh);
     const s = this.project.start;
@@ -243,37 +258,49 @@ export class MapView {
   // ----- Edición -----
   undoEdit() { this.applyHistory(this.undo, this.redo, "from"); }
   redoEdit() { this.applyHistory(this.redo, this.undo, "to"); }
+  private layerArr(layer: 0 | 1 | 2): Uint8Array | Int8Array { return layer === 0 ? this.engine.tiles : layer === 1 ? this.engine.objects : this.heights; }
   private applyHistory(from: Edit[][], to: Edit[][], key: "from" | "to") {
     const s = from.pop();
     if (!s) return;
-    for (const e of s) this.engine.tiles[e.idx] = e[key];
+    for (const e of s) this.layerArr(e.layer)[e.idx] = e[key];
     to.push(s);
     this.world3dDirty = true;
     this.onEdit();
   }
 
-  private setTileTracked(x: number, y: number, t: number) {
+  /** Escribe una celda de una capa registrándola en el trazo actual (para deshacer). */
+  private setCell(layer: 0 | 1 | 2, x: number, y: number, v: number) {
     const w = this.engine.width;
     if (x < 0 || y < 0 || x >= w || y >= this.engine.height) return;
-    const idx = y * w + x;
-    const cur = this.engine.tiles[idx];
-    if (cur === t) return;
-    const prev = this.stroke!.get(idx);
-    this.stroke!.set(idx, { idx, from: prev ? prev.from : cur, to: t });
-    this.engine.tiles[idx] = t;
+    const idx = y * w + x, arr = this.layerArr(layer);
+    const cur = arr[idx];
+    if (cur === v) return;
+    const key = layer * 1e6 + idx;
+    const prev = this.stroke!.get(key);
+    this.stroke!.set(key, { layer, idx, from: prev ? prev.from : cur, to: v });
+    arr[idx] = v;
     this.world3dDirty = true;
+  }
+
+  /** Pinta con el tile elegido en su capa (≥12 → objetos; 255 → quitar objeto). */
+  private paintCell(x: number, y: number, t: number) {
+    if (t === ERASE_OBJECT) this.setCell(1, x, y, 0);
+    else if (t >= OBJECT_MIN) this.setCell(1, x, y, t);
+    else this.setCell(0, x, y, t);
   }
 
   private flood(sx: number, sy: number, t: number) {
     const w = this.engine.width, hh = this.engine.height;
     if (sx < 0 || sy < 0 || sx >= w || sy >= hh) return;
-    const target = this.engine.tiles[sy * w + sx];
-    if (target === t) return;
+    const layer: 0 | 1 = t >= OBJECT_MIN ? 1 : 0;
+    const arr = this.layerArr(layer);
+    const target = arr[sy * w + sx], value = t === ERASE_OBJECT ? 0 : t;
+    if (target === value) return;
     const stack = [[sx, sy]];
     while (stack.length) {
       const [x, y] = stack.pop()!;
-      if (x < 0 || y < 0 || x >= w || y >= hh || this.engine.tiles[y * w + x] !== target) continue;
-      this.setTileTracked(x, y, t);
+      if (x < 0 || y < 0 || x >= w || y >= hh || arr[y * w + x] !== target) continue;
+      this.setCell(layer, x, y, value);
       stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
     }
   }
@@ -290,9 +317,13 @@ export class MapView {
   private act(e: PointerEvent, first: boolean) {
     const { x, y } = this.toTile(e);
     const m = this.map;
-    if (this.tool === "paint") this.setTileTracked(x, y, this.tile);
+    if ((this.tool === "raise" || this.tool === "lower")) { const k = y * 4096 + x; if (this.visited.has(k)) return; this.visited.add(k); }
+    if (this.tool === "paint") this.paintCell(x, y, this.tile);
+    else if (this.tool === "raise" || this.tool === "lower") {
+      if (this.inMap(x, y)) { const i = y * this.engine.width + x; this.setCell(2, x, y, Math.max(-8, Math.min(12, this.heights[i] + (this.tool === "raise" ? 1 : -1)))); }
+    }
     else if (first && this.tool === "fill") this.flood(x, y, this.tile);
-    else if (first && this.tool === "pick") { if (this.inMap(x, y)) this.onPick(this.engine.getTile(x, y)); }
+    else if (first && this.tool === "pick") { if (this.inMap(x, y)) { const o = this.engine.objects[y * this.engine.width + x]; this.onPick(o || this.engine.getTile(x, y)); } }
     else if (first && this.tool === "spawn") {
       if (this.inMap(x, y)) { this.project.start = { map: m.id, x, y }; this.engine.setSpawn(x, y); this.onEdit(); }
     } else if (first && this.tool === "npc" && this.inMap(x, y)) {
@@ -328,6 +359,7 @@ export class MapView {
       }
       if (e.button !== 0) return;
       this.stroke = new Map();
+      this.visited.clear();
       this.act(e, true);
     });
     el.addEventListener("pointermove", (e) => {
@@ -425,6 +457,19 @@ export class MapView {
     requestAnimationFrame((tt) => this.frame(tt));
   }
 
+  /** Altura del suelo en una posición (interpolada entre casillas, para que el personaje suba/baje suavemente). */
+  private groundAt(x: number, y: number) {
+    const w = this.engine.width, hh = this.engine.height, t = this.engine.tiles;
+    const c = (cx: number, cy: number) => {
+      cx = Math.max(0, Math.min(w - 1, cx)); cy = Math.max(0, Math.min(hh - 1, cy));
+      const i = cy * w + cx;
+      return (TILE_HEIGHT[t[i]] ?? 0) + this.heights[i] * 0.25;
+    };
+    const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+    const top = c(x0, y0) * (1 - fx) + c(x0 + 1, y0) * fx, bot = c(x0, y0 + 1) * (1 - fx) + c(x0 + 1, y0 + 1) * fx;
+    return Math.max(0, top * (1 - fy) + bot * fy);
+  }
+
   private npcSprite(n: Npc) {
     const dir = this.playing && this.game ? this.game.npcDir(n) : n.dir;
     return NPC_SPRITE + (n.look % 4) * 4 + dir;
@@ -433,17 +478,17 @@ export class MapView {
   private render3d() {
     const r = this.r3d;
     if (!r) return;
-    if (this.world3dDirty) { r.setWorld(this.engine.tiles, this.engine.width, this.engine.height); this.world3dDirty = false; }
+    if (this.world3dDirty) { r.setWorld(this.engine.tiles, this.engine.objects, this.heights, this.engine.width, this.engine.height); this.world3dDirty = false; }
     const pl = this.engine.player;
-    const ents: Entity3D[] = this.map.npcs.map((n) => ({ x: n.x, y: n.y, sprite: NPC_SPRITE + (n.look % 4) * 4, dir: this.playing && this.game ? this.game.npcDir(n) : n.dir }));
+    const ents: Entity3D[] = this.map.npcs.map((n) => ({ x: n.x, y: n.y, z: this.groundAt(n.x, n.y), sprite: NPC_SPRITE + (n.look % 4) * 4, dir: this.playing && this.game ? this.game.npcDir(n) : n.dir }));
     if (this.playing) {
-      ents.push({ x: pl.x, y: pl.y, sprite: PLAYER_SPRITE, dir: pl.dir });
+      ents.push({ x: pl.x, y: pl.y, z: this.groundAt(pl.x, pl.y), sprite: PLAYER_SPRITE, dir: pl.dir });
       const k = 1 - Math.exp(-this.dt * 10);
       this.cam3.x += (pl.x + 0.5 - this.cam3.x) * k;
       this.cam3.z += (pl.y + 0.5 - this.cam3.z) * k;
     } else {
       const s = this.project.start;
-      if (s.map === this.map.id) ents.push({ x: s.x, y: s.y, sprite: PLAYER_SPRITE, dir: 0 });
+      if (s.map === this.map.id) ents.push({ x: s.x, y: s.y, z: this.groundAt(s.x, s.y), sprite: PLAYER_SPRITE, dir: 0 });
       this.cam3.x = this.engine.width / 2; this.cam3.z = this.engine.height / 2;
     }
     r.draw(this.cam3, ents);
@@ -465,9 +510,16 @@ export class MapView {
     const tiles = e.tiles;
     let n = 0;
     const put = (x: number, y: number, idx: number) => { const o = n++ * 4; this.inst[o] = x; this.inst[o + 1] = y; this.inst[o + 2] = idx; this.inst[o + 3] = 0; };
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(x * TILE, y * TILE, tiles[y * w + x]);
+    const frame = Math.floor(performance.now() / ANIM_MS) % 2;
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const g = tiles[y * w + x];
+      put(x * TILE, y * TILE, frame && TILE_ANIM[g] !== undefined ? TILE_ANIM[g] : atlasIndex(g));
+    }
+    const objs = e.objects;
     // entidades ordenadas por Y para el solape correcto
-    const ents: { y: number; px: number; py: number; idx: number }[] = this.map.npcs.map((k) => ({ y: k.y, px: k.x * TILE, py: k.y * TILE - 2, idx: this.npcSprite(k) }));
+    const ents: { y: number; px: number; py: number; idx: number }[] = [];
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const o = objs[y * w + x]; if (o) ents.push({ y, px: x * TILE, py: y * TILE, idx: atlasIndex(o) }); }
+    ents.push(...this.map.npcs.map((k) => ({ y: k.y, px: k.x * TILE, py: k.y * TILE - 2, idx: this.npcSprite(k) })));
     if (this.playing) ents.push({ y: player.y, px: Math.round(player.x * TILE), py: Math.round(player.y * TILE) - 2, idx: PLAYER_SPRITE + player.dir });
     else if (this.project.start.map === this.map.id) ents.push({ y: this.project.start.y, px: this.project.start.x * TILE, py: this.project.start.y * TILE - 2, idx: PLAYER_SPRITE });
     ents.sort((a, b) => a.y - b.y);
@@ -486,6 +538,17 @@ export class MapView {
       const t = this.engine.tiles, w = this.engine.width;
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (this.engine.isSolid(t[y * w + x])) g.fillRect(sx(x), sy(y), ts, ts);
       for (const n of this.map.npcs) g.fillRect(sx(n.x), sy(n.y), ts, ts);
+    }
+    if (this.showHeights || this.tool === "raise" || this.tool === "lower") {
+      g.font = `bold ${Math.max(9, 11 * this.dpr * Math.min(zoom, 3) / 2)}px system-ui, sans-serif`;
+      const w = this.engine.width;
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const hv = this.heights[y * w + x];
+        if (!hv) continue;
+        g.fillStyle = hv > 0 ? `rgba(255,193,7,${Math.min(0.55, 0.15 + hv * 0.05)})` : `rgba(33,150,243,${Math.min(0.55, 0.15 - hv * 0.05)})`;
+        g.fillRect(sx(x), sy(y), ts, ts);
+        g.fillStyle = "#fff"; g.fillText(String(hv), sx(x) + ts * 0.3, sy(y) + ts * 0.65);
+      }
     }
     if (this.showGrid && zoom >= 1.5) {
       g.strokeStyle = "rgba(255,255,255,0.18)";

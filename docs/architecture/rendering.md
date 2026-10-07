@@ -29,3 +29,8 @@ Capturas de frames de referencia para tests visuales (ver [testing](../guides/te
 
 ## Modo 3D (`packages/editor/src/renderer3d.ts`)
 Ver [ADR-0005](../adr/0005-3d-mode.md). Un único pipeline (posición, uv, sombreado por cara) con depth buffer `depth24plus`, alpha-test y niebla lineal. Malla estática del mapa + buffer dinámico para billboards de personajes. Cámara: perspectiva 40°, pitch ≈ 0.95 rad, distancia 13 en juego.
+
+### Capas, animación y alturas
+- **Objetos**: capa transparente sobre el suelo (ids ≥ 12 → celdas 32–37 del atlas); en 2D se ordenan por Y con los personajes; en 3D son quads cruzados. La colisión de los objetos vive en el núcleo (`objects` en `engine-core`).
+- **Animación**: los tiles de suelo con alternativa (`TILE_ANIM`: agua y hierba alta) cambian de fotograma cada 450 ms. En 3D el vértice lleva un desplazamiento de UV (`duv`) y el shader lo multiplica por el fotograma (uniforme).
+- **Alturas**: `heights` suma a la altura base del tile; la malla genera caras laterales en los desniveles y los personajes interpolan la altura del suelo al caminar.

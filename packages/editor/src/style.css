@@ -101,3 +101,11 @@ td.nw { white-space: nowrap; }
 #app.player .stage { position: relative; padding: 0; } #app.player .viewport { border-radius: 0; border: none; }
 .toast { position: absolute; top: 10px; left: 50%; translate: -50% -20px; background: rgba(20,22,32,.92); color: #fff; padding: 6px 14px; border-radius: 99px; font-size: 13px; opacity: 0; transition: .3s; pointer-events: none; z-index: 9; }
 .toast.show { opacity: 1; translate: -50% 0; }
+
+/* combates dobles */
+.battle.size2 .mon { width: 17%; min-width: 80px; }
+.battle.size2 .mon.foe.s0 { right: 30%; top: 8%; } .battle.size2 .mon.foe.s1 { right: 8%; top: 20%; }
+.battle.size2 .mon.pl.s0 { left: 6%; bottom: 36%; } .battle.size2 .mon.pl.s1 { left: 26%; bottom: 26%; }
+.battle.size2 .fplate.s0 { left: 3%; top: 3%; } .battle.size2 .fplate.s1 { left: 3%; top: 21%; }
+.battle.size2 .pplate.s0 { right: 3%; bottom: 52%; } .battle.size2 .pplate.s1 { right: 3%; bottom: 33%; }
+.battle.size2 .plate { min-width: 160px; padding: 3px 8px; font-size: 12px; }

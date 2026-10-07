@@ -18,9 +18,8 @@ const OPPOSITE = [1, 0, 3, 2];
 
 export class Game {
   party: Mon[];
-  inv: { ball: number; potion: number };
+  inv: Record<string, number>;
   defeated = new Set<string>();
-  flags = new Set<string>();
   mapIndex = 0;
   /** true mientras hay diálogo/combate/transición: el bucle no avanza la simulación. */
   busy = false;
@@ -29,6 +28,7 @@ export class Game {
   constructor(private p: Project, private e: Engine, private host: Host) {
     this.party = p.party.map((t) => makeMon(p, t.species, t.level));
     this.inv = { ...p.inventory };
+    e.flagsReset();
   }
 
   get map(): GameMap { return this.p.maps[this.mapIndex]; }
@@ -103,7 +103,7 @@ export class Game {
         else await this.challenge(npc);
       } else if (npc.kind === "script") {
         const r = parseScript(npc.script ?? "");
-        if (r.ok) await runScript(r.code, this.scriptCtx(npc));
+        if (r.ok) await runScript(r.code, this.scriptCtx(npc), this.e);
         else this.host.say(`Script de ${npc.name} con errores: ${r.errors[0]}`);
       } else await this.host.dialog(npc.name, npc.lines.length ? npc.lines : ["..."]);
     });
@@ -112,10 +112,8 @@ export class Game {
   private scriptCtx(npc: Npc): ScriptCtx {
     return {
       say: (lines) => this.host.dialog(npc.name, lines),
-      give: (item, n) => { this.inv[item] += n; sfx("heal"); this.host.say(`Recibes ${n} × ${item === "ball" ? "bola" : "poción"}.`); },
+      give: (item, n) => { this.inv[item] = (this.inv[item] ?? 0) + n; sfx("heal"); this.host.say(`Recibes ${n} × ${this.p.items.find((i) => i.id === item)?.name ?? item}.`); },
       heal: () => { healAll(this.p, this.party); sfx("heal"); },
-      has: (f) => this.flags.has(f),
-      set: (f, on) => { if (on) this.flags.add(f); else this.flags.delete(f); },
       battle: async (sp, lv) => { await this.fight([makeMon(this.p, sp, lv)]); },
       givemon: (sp, lv) => { if (this.party.length < 6) { this.party.push(makeMon(this.p, sp, lv)); sfx("catch"); this.host.say("¡Un nuevo compañero se une a tu equipo!"); } },
       warp: (m, x, y) => this.warpTo(m, x, y),
@@ -127,7 +125,7 @@ export class Game {
     await this.host.dialog(n.name, n.lines.length ? n.lines : ["¡Combatamos!"]);
     const foes = (n.team ?? []).map((t) => makeMon(this.p, t.species, t.level));
     if (!foes.length) return;
-    const res = await this.fight(foes, n.name);
+    const res = await this.fight(foes, n.name, n.double);
     if (res === "win") {
       this.defeated.add(this.key(n));
       await this.host.dialog(n.name, n.defeatedLines?.length ? n.defeatedLines : ["Me has vencido."]);
@@ -143,9 +141,9 @@ export class Game {
     await this.fight([makeMon(this.p, id, lvl)]);
   }
 
-  private async fight(foes: Mon[], trainer?: string) {
+  private async fight(foes: Mon[], trainer?: string, double?: boolean) {
     if (!this.party.some((m) => m.hp > 0)) healAll(this.p, this.party);
-    const b = new Battle(this.p, this.e, this.party, foes, { trainer, inv: this.inv });
+    const b = new Battle(this.p, this.e, this.party, foes, { trainer, double, inv: this.inv });
     await this.host.battle(b);
     if (b.result === "lose") {
       healAll(this.p, this.party);

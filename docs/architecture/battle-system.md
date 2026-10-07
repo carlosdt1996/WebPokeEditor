@@ -23,4 +23,4 @@ Niveles: aleatoria → heurística de daño → reglas por trainer (scripteable)
 Tests contra casos conocidos de cálculo de daño y *replays*.
 
 ## Implementación actual
-La lógica de turnos vive en `packages/editor/src/battle.ts` (TypeScript) y usa del núcleo WASM el RNG determinista (`engine.rand`) y la fórmula de daño (`engine.damage`), por lo que es reproducible por semilla y está cubierta por tests. Mover el bucle de turnos a un crate `battle` en Rust sigue en el roadmap.
+`packages/editor/src/battle.ts` (TypeScript) simula combates **1v1 y 2v2**; usa del núcleo WASM el RNG determinista (`engine.rand`) y la fórmula de daño (`engine.damage`), por lo que es reproducible por semilla y está cubierta por tests. Un entrenador con `double: true` activa el modo doble si ambos lados tienen 2+ criaturas en pie. Orden por prioridad (cambios/objetos antes que ataques) y velocidad; el rival elige movimiento y objetivo con el RNG. Objetos curativos y de captura se definen como datos (`items`). Mover el bucle de turnos a un crate `battle` en Rust sigue pendiente: hoy solo la fórmula de daño y el RNG viven en Rust.

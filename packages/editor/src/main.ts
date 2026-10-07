@@ -4,8 +4,9 @@ import { h } from "./dom";
 import { Engine } from "./engine";
 import { MapView, type Selection, type Tool } from "./mapView";
 import { SCRIPT_HELP, parseScript } from "./script";
-import { type Npc, type Project, type Warp, defaultProject, loadLocal, parseProject, saveLocal, uniqueId, validate } from "./project";
-import { ATLAS_COLS, ATLAS_ROWS, TILE, TILE_DEFS, atlasFromDataUrl, createAtlas } from "./tiles";
+import { type Npc, type Project, type Warp, defaultProject, parseProject, saveLocal, uniqueId, validate } from "./project";
+import { loadProject as loadStored, saveProject } from "./storage";
+import { ATLAS_COLS, ATLAS_ROWS, ERASE_OBJECT, TILE, TILE_DEFS, atlasFromDataUrl, atlasIndex, createAtlas } from "./tiles";
 import { exportGameHtml, runPlayer } from "./player";
 import { battlePanel } from "./ui/battlePanel";
 import { dataPanel } from "./ui/dataPanel";
@@ -14,7 +15,7 @@ async function main() {
   if (window.__WPE_PLAYER__) { await runPlayer(); return; }
   const app = document.getElementById("app")!;
   const engine = await Engine.load(`${import.meta.env.BASE_URL}engine_core.wasm`);
-  let project: Project = loadLocal() ?? defaultProject();
+  let project: Project = (await loadStored()) ?? defaultProject();
 
   const view = new MapView(engine);
   const status = h("span", { class: "status" });
@@ -29,7 +30,9 @@ async function main() {
     clearTimeout(timer);
     pending = false;
     view.commit();
-    status.textContent = saveLocal(project) ? "Guardado localmente ✓" : "⚠ No se pudo guardar (¿imágenes muy grandes?). Exporta el proyecto.";
+    void saveProject(project).then((where) => {
+      status.textContent = where === "opfs" ? "Guardado (OPFS) ✓" : where === "local" ? "Guardado localmente ✓" : "⚠ No se pudo guardar. Exporta el proyecto.";
+    });
   };
   const persist = () => {
     clearTimeout(timer);
@@ -38,7 +41,7 @@ async function main() {
     timer = window.setTimeout(saveNow, 400);
   };
   // no perder la última edición al recargar o cerrar la pestaña
-  const flush = () => { if (pending && !view.playing) saveNow(); };
+  const flush = () => { if (pending && !view.playing) { saveNow(); saveLocal(project); } };
   window.addEventListener("pagehide", flush);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
   view.onEdit = () => { persist(); sizeLabel(); };
@@ -47,13 +50,20 @@ async function main() {
   let atlas = (project.atlas && (await atlasFromDataUrl(project.atlas))) || createAtlas();
   const palette = h("div", { class: "palette" });
   const swatches: HTMLElement[] = [];
-  const selectTile = (t: number) => { view.tile = t; swatches.forEach((s, i) => s.classList.toggle("sel", i === t)); };
+  const selectTile = (t: number) => { view.tile = t; swatches.forEach((s) => s.classList.toggle("sel", s.dataset.id === String(t))); };
   const buildPalette = () => {
     palette.replaceChildren(); swatches.length = 0;
-    for (const d of TILE_DEFS) {
+    const entries = [...TILE_DEFS.map((d) => ({ id: d.id as number, name: d.name as string, solid: d.solid as boolean })), { id: ERASE_OBJECT, name: "Sin objeto", solid: false }];
+    for (const d of entries) {
       const c = h("canvas", { width: TILE, height: TILE, title: d.name + (d.solid ? " (sólido)" : "") });
-      c.getContext("2d")!.drawImage(atlas, (d.id % ATLAS_COLS) * TILE, Math.floor(d.id / ATLAS_COLS) * TILE, TILE, TILE, 0, 0, TILE, TILE);
-      const b = h("button", { class: "swatch", onclick: () => { selectTile(d.id); if (["pick", "spawn", "npc", "warp"].includes(view.tool)) setTool("paint"); } }, c, h("span", {}, d.name));
+      if (d.id !== ERASE_OBJECT) {
+        const g = c.getContext("2d")!;
+        if (d.id >= 12) { g.fillStyle = "#5fb94d"; g.fillRect(0, 0, TILE, TILE); }
+        const i = atlasIndex(d.id);
+        g.drawImage(atlas, (i % ATLAS_COLS) * TILE, Math.floor(i / ATLAS_COLS) * TILE, TILE, TILE, 0, 0, TILE, TILE);
+      } else { const g = c.getContext("2d")!; g.strokeStyle = "#e53935"; g.lineWidth = 2; g.beginPath(); g.moveTo(2, 2); g.lineTo(14, 14); g.moveTo(14, 2); g.lineTo(2, 14); g.stroke(); }
+      const b = h("button", { class: "swatch", onclick: () => { selectTile(d.id); if (["pick", "spawn", "npc", "warp", "raise", "lower"].includes(view.tool)) setTool("paint"); } }, c, h("span", {}, d.name));
+      b.dataset.id = String(d.id);
       swatches.push(b); palette.append(b);
     }
     selectTile(view.tile);
@@ -70,13 +80,13 @@ async function main() {
   const toolBtns = new Map<Tool, HTMLElement>();
   const setTool = (t: Tool) => { view.tool = t; toolBtns.forEach((b, k) => b.classList.toggle("sel", k === t)); };
   const tools = h("div", { class: "tools" });
-  for (const [t, label, key] of [["paint", "✏️ Pintar", "B"], ["fill", "🪣 Rellenar", "G"], ["pick", "💧 Cuentagotas", "I"], ["spawn", "📍 Inicio", "P"], ["npc", "🧑 NPC", "N"], ["warp", "🚪 Salto", "J"]] as [Tool, string, string][]) {
+  for (const [t, label, key] of [["paint", "✏️ Pintar", "B"], ["fill", "🪣 Rellenar", "G"], ["pick", "💧 Cuentagotas", "I"], ["spawn", "📍 Inicio", "P"], ["npc", "🧑 NPC", "N"], ["warp", "🚪 Salto", "J"], ["raise", "⛰ Elevar", "U"], ["lower", "🕳 Bajar", "H"]] as [Tool, string, string][]) {
     const b = h("button", { title: `${label} (${key})`, onclick: () => setTool(t) }, label);
     toolBtns.set(t, b); tools.append(b);
   }
   window.addEventListener("keydown", (e) => {
     if (["INPUT", "SELECT", "TEXTAREA"].includes((e.target as HTMLElement).tagName) || e.ctrlKey || e.metaKey || view.playing) return;
-    const m: Record<string, Tool> = { KeyB: "paint", KeyG: "fill", KeyI: "pick", KeyP: "spawn", KeyN: "npc", KeyJ: "warp" };
+    const m: Record<string, Tool> = { KeyB: "paint", KeyG: "fill", KeyI: "pick", KeyP: "spawn", KeyN: "npc", KeyJ: "warp", KeyU: "raise", KeyH: "lower" };
     if (m[e.code]) setTool(m[e.code]);
   });
 
@@ -141,6 +151,7 @@ async function main() {
         h("h3", {}, "NPC"),
         field("Nombre", h("input", { type: "text", value: n.name, oninput: (e: Event) => { n.name = (e.target as HTMLInputElement).value; persist(); } })),
         field("Tipo", sel(n.kind, [["talk", "Conversación"], ["trainer", "Entrenador"], ["healer", "Curandero"], ["script", "Script"]], (v) => { n.kind = v as Npc["kind"]; if (n.kind === "trainer" && !n.team?.length) n.team = [{ species: project.species[0]?.id ?? "", level: 5 }]; })),
+        ...(n.kind === "trainer" ? [h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!n.double, onchange: (e: Event) => { n.double = (e.target as HTMLInputElement).checked; persist(); } }), "Combate doble (2 contra 2)")] : []),
         field("Aspecto", sel(n.look, [[0, "Morado"], [1, "Verde"], [2, "Gris"], [3, "Naranja"]], (v) => (n.look = +v))),
         field("Mira hacia", sel(n.dir, [[0, "Abajo"], [1, "Arriba"], [2, "Izquierda"], [3, "Derecha"]], (v) => (n.dir = +v))),
         field("Posición", numIn(n.x, (v) => (n.x = v), 0, engine.width - 1), numIn(n.y, (v) => (n.y = v), 0, engine.height - 1)),
@@ -191,6 +202,7 @@ async function main() {
     h("h3", {}, "Vista"),
     check("Cuadrícula", true, (v) => (view.showGrid = v)),
     check("Mostrar colisiones", false, (v) => (view.showSolid = v)),
+    check("Mostrar alturas (3D)", false, (v) => (view.showHeights = v)),
     h("button", { onclick: () => view.fit() }, "Centrar mapa"),
     h("h3", {}, "Mapas"),
     h("div", { class: "row" }, mapSelect),
@@ -277,6 +289,7 @@ async function main() {
   footer.querySelector("b")!.textContent = view.rendererKind === "webgpu" ? "WebGPU (+3D)" : "Canvas 2D (sin WebGPU, sin modo 3D)";
   buildPalette(); selectTile(1); setTool("paint"); show("map"); sync();
   status.textContent = "Listo";
+  if (import.meta.env.PROD && "serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
   say("Bienvenido. Pinta el mapa, coloca NPC y saltos, y pulsa ▶ Probar. Prueba también 🧊 3D.");
   void ((window as unknown as Record<string, unknown>).__wpe = { engine, view, get project() { return project; } });
 }

@@ -1,7 +1,7 @@
 /** Modelo de datos del proyecto (ver docs/architecture/data-model.md). Todo es dato serializable. */
 import { parseScript } from "./script";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface Stats { hp: number; atk: number; def: number; spa: number; spd: number; spe: number }
 export const STAT_KEYS: (keyof Stats)[] = ["hp", "atk", "def", "spa", "spd", "spe"];
@@ -25,14 +25,21 @@ export interface Npc {
   /** Solo entrenadores. */
   team?: TeamMember[];
   defeatedLines?: string[];
+  /** Solo entrenadores: combate 2 contra 2 (necesita 2+ criaturas en cada equipo). */
+  double?: boolean;
   /** Solo kind "script": ver script.ts. */
   script?: string;
 }
+export interface ItemDef { id: string; name: string; kind: "heal" | "ball"; /** heal: PS que cura. ball: bonus (+%) a la probabilidad de captura. */ amount: number }
 export interface Warp { x: number; y: number; toMap: string; toX: number; toY: number }
 
 export interface GameMap {
   id: string; name: string; w: number; h: number; tiles: string;
   npcs: Npc[]; warps: Warp[];
+  /** Capa de objetos (base64 u8, 0 = vacío): decoración sobre el suelo, con transparencia. */
+  objects?: string;
+  /** Altura por casilla para el modo 3D (base64 de Int8 + 128; unidades de 0,25 tiles). */
+  heights?: string;
   /** Ids de especies que aparecen en hierba alta de este mapa. */
   encounters: string[];
   encounterLevel: [number, number];
@@ -45,7 +52,8 @@ export interface Project {
   maps: GameMap[];
   start: { map: string; x: number; y: number };
   party: TeamMember[];
-  inventory: { ball: number; potion: number };
+  items: ItemDef[];
+  inventory: Record<string, number>;
   /** Nombres de tipo; el índice es el id de tipo. */
   types: string[];
   /** typeChart[atacante][defensor] = multiplicador (0, 0.5, 1, 2). */
@@ -72,7 +80,11 @@ const st = (hp: number, atk: number, def: number, spa: number, spd: number, spe:
 
 class Grid {
   t: Uint8Array;
-  constructor(public w: number, public h: number, fillTile = 0) { this.t = new Uint8Array(w * h).fill(fillTile); }
+  o: Uint8Array;
+  hg: Int8Array;
+  constructor(public w: number, public h: number, fillTile = 0) { this.t = new Uint8Array(w * h).fill(fillTile); this.o = new Uint8Array(w * h); this.hg = new Int8Array(w * h); }
+  obj(x: number, y: number, v: number) { if (x >= 0 && y >= 0 && x < this.w && y < this.h) this.o[y * this.w + x] = v; }
+  height(x0: number, y0: number, x1: number, y1: number, v: number) { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) this.hg[y * this.w + x] = v; }
   set(x: number, y: number, v: number) { if (x >= 0 && y >= 0 && x < this.w && y < this.h) this.t[y * this.w + x] = v; }
   rect(x0: number, y0: number, x1: number, y1: number, v: number) { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) this.set(x, y, v); }
   border(v: number) { this.rect(0, 0, this.w - 1, 0, v); this.rect(0, this.h - 1, this.w - 1, this.h - 1, v); this.rect(0, 0, 0, this.h - 1, v); this.rect(this.w - 1, 0, this.w - 1, this.h - 1, v); }
@@ -91,6 +103,13 @@ export function defaultProject(): Project {
   for (const [x, y] of [[9, 3], [9, 6], [13, 12], [14, 14], [20, 14]]) town.set(x, y, 4);
   for (const [x, y] of [[13, 3], [18, 11], [19, 12], [16, 15], [3, 7], [7, 7]]) town.set(x, y, 6);
   town.set(23, 9, 2);
+  // objetos (capa superior) y una colina para el modo 3D
+  town.obj(10, 8, 17); // cartel junto al cruce
+  for (const [x, y] of [[20, 10], [21, 11], [3, 16]]) town.obj(x, y, 15);
+  for (let x = 13; x <= 16; x++) town.obj(x, 12, 16);
+  for (const [x, y] of [[2, 6], [8, 6], [1, 3]]) town.obj(x, y, 14);
+  town.obj(9, 2, 12);
+  town.height(16, 13, 20, 15, 2); town.height(17, 14, 19, 14, 3);
 
   // --- Casa (interior) ---
   const home = new Grid(10, 8, 9);
@@ -108,9 +127,15 @@ export function defaultProject(): Project {
   for (const [x, y] of [[2, 10], [4, 12], [9, 4], [10, 2], [11, 6]]) route.set(x, y, 4);
   for (const [x, y] of [[1, 6], [20, 6], [8, 10]]) route.set(x, y, 6);
   route.set(0, 8, 2);
+  for (const [x, y] of [[5, 5], [16, 7], [2, 13]]) route.obj(x, y, 15);
+  for (const [x, y] of [[7, 3], [9, 14], [18, 6]]) route.obj(x, y, 13);
+  route.height(1, 1, 4, 3, 2); route.height(2, 2, 3, 2, 4);
 
   const mapOf = (id: string, name: string, g: Grid, extra: Partial<GameMap>): GameMap => ({
-    id, name, w: g.w, h: g.h, tiles: encodeTiles(g.t), npcs: [], warps: [], encounters: [], encounterLevel: [3, 6], ...extra,
+    id, name, w: g.w, h: g.h, tiles: encodeTiles(g.t), npcs: [], warps: [], encounters: [], encounterLevel: [3, 6],
+    objects: g.o.some((v) => v) ? encodeTiles(g.o) : undefined,
+    heights: g.hg.some((v) => v) ? encodeTiles(Uint8Array.from(g.hg, (v) => v + 128)) : undefined,
+    ...extra,
   });
 
   return {
@@ -118,8 +143,14 @@ export function defaultProject(): Project {
     name: "Mi Fangame",
     seed: 12345,
     start: { map: "pueblo", x: 11, y: 8 },
-    party: [{ species: "flamito", level: 5 }],
-    inventory: { ball: 8, potion: 4 },
+    party: [{ species: "flamito", level: 5 }, { species: "hojin", level: 5 }],
+    items: [
+      { id: "potion", name: "Poción", kind: "heal", amount: 20 },
+      { id: "superpotion", name: "Superpoción", kind: "heal", amount: 60 },
+      { id: "ball", name: "Bola", kind: "ball", amount: 0 },
+      { id: "superball", name: "Superbola", kind: "ball", amount: 20 },
+    ],
+    inventory: { ball: 8, potion: 4, superpotion: 1 },
     maps: [
       mapOf("pueblo", "Pueblo Inicial", town, {
         warps: [
@@ -145,6 +176,7 @@ export function defaultProject(): Project {
         warps: [{ x: 0, y: 8, toMap: "pueblo", toX: 22, toY: 9 }],
         npcs: [
           { id: "joven", x: 14, y: 6, look: 1, dir: 0, kind: "trainer", name: "Joven Marcos", lines: ["¡Oye! ¡Nuestras miradas se cruzaron, a combatir!"], team: [{ species: "pelusin", level: 4 }, { species: "hojin", level: 5 }], defeatedLines: ["Vaya... eres más fuerte de lo que parece."] },
+          { id: "hermanos", x: 17, y: 12, look: 0, dir: 2, kind: "trainer", name: "Hermanos Gil", double: true, lines: ["¡Somos dos, y combatimos juntos!"], team: [{ species: "pelusin", level: 5 }, { species: "aquin", level: 5 }], defeatedLines: ["¡Hermano, nos han ganado!"] },
           { id: "campista", x: 6, y: 10, look: 3, dir: 3, kind: "trainer", name: "Campista Ana", lines: ["¡En el campo se aprende rápido!"], team: [{ species: "aquin", level: 6 }], defeatedLines: ["¡Bien jugado!"] },
         ],
         encounters: ["pelusin", "pelusin", "hojin", "flamito", "aquin"],
@@ -190,6 +222,14 @@ export function migrate(input: unknown): Project {
     delete p.map; delete p.encounters;
     p.schemaVersion = 2;
   }
+  if (p.schemaVersion === 2) {
+    p.items = [
+      { id: "potion", name: "Poción", kind: "heal", amount: 20 },
+      { id: "ball", name: "Bola", kind: "ball", amount: 0 },
+    ];
+    p.inventory = { ball: p.inventory?.ball ?? 5, potion: p.inventory?.potion ?? 3 };
+    p.schemaVersion = 3;
+  }
   return p as Project;
 }
 
@@ -200,6 +240,9 @@ export function validate(p: Project): string[] {
   const speciesIds = new Set(p.species.map((s) => s.id));
   const moveIds = new Set(p.moves.map((m) => m.id));
   const mapIds = new Set(p.maps.map((m) => m.id));
+  const itemIds = new Set(p.items.map((i) => i.id));
+  if (itemIds.size !== p.items.length) errs.push("Ids de objeto duplicados");
+  for (const k of Object.keys(p.inventory)) if (!itemIds.has(k)) errs.push(`Inventario: objeto inexistente "${k}"`);
   if (!p.maps.length) errs.push("El proyecto no tiene mapas");
   if (mapIds.size !== p.maps.length) errs.push("Ids de mapa duplicados");
   if (speciesIds.size !== p.species.length) errs.push("Ids de especie duplicados");
@@ -209,6 +252,8 @@ export function validate(p: Project): string[] {
   else if (p.start.x >= start.w || p.start.y >= start.h) errs.push("El punto de inicio está fuera del mapa");
   for (const t of p.party) if (!speciesIds.has(t.species)) errs.push(`Equipo inicial: especie inexistente "${t.species}"`);
   for (const m of p.maps) {
+    if (m.objects && atob(m.objects).length !== m.w * m.h) errs.push(`${m.name}: la capa de objetos no coincide con el tamaño`);
+    if (m.heights && atob(m.heights).length !== m.w * m.h) errs.push(`${m.name}: la capa de alturas no coincide con el tamaño`);
     if (!(m.w >= 1 && m.w <= 128 && m.h >= 1 && m.h <= 128)) errs.push(`${m.name}: tamaño fuera de rango (1–128)`);
     for (const e of m.encounters) if (!speciesIds.has(e)) errs.push(`${m.name}: encuentro con especie inexistente "${e}"`);
     for (const n of m.npcs) {
@@ -218,11 +263,13 @@ export function validate(p: Project): string[] {
         const r = parseScript(n.script ?? "");
         if (!r.ok) errs.push(...r.errors.map((e) => `${m.name}: script de "${n.name}": ${e}`));
         else for (const i of r.code) {
+          if (i.op === "give" && !itemIds.has(i.item)) errs.push(`${m.name}: script de "${n.name}": objeto inexistente "${i.item}"`);
           if ((i.op === "battle" || i.op === "givemon") && !speciesIds.has(i.species)) errs.push(`${m.name}: script de "${n.name}": especie inexistente "${i.species}"`);
           if (i.op === "warp") { const d = p.maps.find((k) => k.id === i.map); if (!d) errs.push(`${m.name}: script de "${n.name}": mapa inexistente "${i.map}"`); else if (i.x >= d.w || i.y >= d.h) errs.push(`${m.name}: script de "${n.name}": warp fuera del mapa`); }
         }
       }
       if (n.kind === "trainer" && !(n.team?.length)) errs.push(`${m.name}: el entrenador "${n.name}" no tiene equipo`);
+      if (n.kind === "trainer" && n.double && (n.team?.length ?? 0) < 2) errs.push(`${m.name}: el entrenador "${n.name}" necesita 2+ criaturas para un combate doble`);
     }
     for (const w of m.warps) {
       const dest = p.maps.find((d) => d.id === w.toMap);
@@ -263,13 +310,13 @@ export function uniqueId(existing: string[], base: string) {
   return id;
 }
 
-const KEY = "webpokeeditor.project.v2";
+const KEY = "webpokeeditor.project.v3";
 export function saveLocal(p: Project): boolean {
   try { localStorage.setItem(KEY, JSON.stringify(p)); return true; } catch { return false; }
 }
 export function loadLocal(): Project | null {
   try {
-    const s = localStorage.getItem(KEY) ?? localStorage.getItem("webpokeeditor.project.v1");
+    const s = localStorage.getItem(KEY) ?? localStorage.getItem("webpokeeditor.project.v2") ?? localStorage.getItem("webpokeeditor.project.v1");
     return s ? parseProject(s) : null;
   } catch { return null; }
 }

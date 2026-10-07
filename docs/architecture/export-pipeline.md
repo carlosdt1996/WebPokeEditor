@@ -22,3 +22,6 @@ El pack no ejecuta código arbitrario: solo datos + bytecode de la VM.
 
 ## Implementación actual
 *📦 Exportar juego* descarga un único `.html`: el editor (misma build) con CSS y JS inlinados, el WASM en base64 y el proyecto embebidos; `window.__WPE_PLAYER__` activa el modo player (`player.ts`) sin interfaz de edición. Solo funciona desde la build de producción. Pendiente: PWA y empaquetado de escritorio.
+
+## PWA
+`public/manifest.webmanifest` + `public/sw.js` (red primero para la página, caché primero para el resto) + iconos PNG/SVG. Se registra solo en producción y no en el `.html` exportado. Tras la primera visita la app carga sin conexión.

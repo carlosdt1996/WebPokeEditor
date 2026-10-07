@@ -13,7 +13,7 @@
 CI: lint → tests Rust → build WASM → tests TS → E2E.
 
 ## Estado actual
-- **Rust** (`cargo test`): movimiento, colisiones, bloqueadores, determinismo, fórmula de daño.
-- **Vitest** (`packages/editor/src/engine.test.ts`): API WASM, migración de esquema, validación, combate (determinismo, captura, XP, aprendizaje y evolución), parser/ejecutor de scripts.
-- **E2E** (`packages/editor/e2e/e2e.mjs`, 19 pruebas en Chromium real con WebGPU por software): edición (pintar, deshacer/rehacer, rellenar, cuentagotas, redimensionar, persistencia), inspector de NPC/saltos y scripts, gestión de mapas, recorrer puertas, NPC con script, curandero, entrenador con visión y combate completo (victoria, captura, derrota), modo 3D, importación de sprites/atlas (válidos e inválidos), exportar/importar proyecto (incluida migración v1 y JSON inválido) y exportar el juego a `.html` y jugarlo. `SHOTS=dir` guarda capturas.
+- **Rust** (`cargo test`): movimiento, colisiones, bloqueadores, capa de objetos, determinismo, fórmula de daño y VM de scripts.
+- **Vitest** (`packages/editor/src/engine.test.ts`): API WASM, migraciones v1→v3, validación, combate (1v1, 2v2, captura, objetos, XP, aprendizaje y evolución), scripts sobre la VM de Rust, capa de objetos y CSV.
+- **E2E** (`packages/editor/e2e/e2e.mjs`, Chromium real con WebGPU por software): edición y capas (suelo, objetos, alturas), inspector de NPC/saltos/scripts, gestión de mapas, recorrer puertas, NPC con script, curandero, entrenadores (1v1 y 2v2) con combate completo, captura y derrota, modo 3D, importación de sprites/atlas, objetos, CSV, exportar/importar proyecto (incluida migración), guardado en OPFS, PWA sin conexión y exportar el juego a `.html`. `SHOTS=dir` guarda capturas.
 - El job `e2e` de CI es informativo (`continue-on-error`).

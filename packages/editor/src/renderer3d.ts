@@ -1,17 +1,17 @@
 /** Renderer 3D (WebGPU) estilo DS: terreno por tiles con alturas, billboards y cámara orbital inclinada. */
-import { ATLAS_COLS, ATLAS_ROWS, BB_FLOWER, BB_TREE, BB_TUFT, TILE_HEIGHT } from "./tiles";
+import { ANIM_MS, ATLAS_COLS, ATLAS_ROWS, BB_FENCE, BB_FLOWER, BB_ROCK, BB_SIGN, BB_TREE, BB_TUFT, TILE_ANIM, TILE_HEIGHT, atlasIndex } from "./tiles";
 
 const SHADER = /* wgsl */ `
 struct U { vp: mat4x4<f32>, cam: vec4<f32>, fog: vec4<f32>, range: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
-struct VIn { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) shade: f32 };
+struct VIn { @location(0) pos: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) shade: f32, @location(3) duv: vec2<f32> };
 struct VOut { @builtin(position) p: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) shade: f32, @location(2) dist: f32 };
 @vertex fn vs(v: VIn) -> VOut {
   var o: VOut;
   o.p = u.vp * vec4<f32>(v.pos, 1.0);
-  o.uv = v.uv; o.shade = v.shade;
+  o.uv = v.uv + v.duv * u.range.z; o.shade = v.shade;
   o.dist = distance(v.pos, u.cam.xyz);
   return o;
 }
@@ -50,24 +50,28 @@ export interface Cam3D { x: number; z: number; yaw: number; pitch: number; dist:
 export interface Entity3D {
   /** Posición en tiles (esquina superior-izquierda de la celda). */
   x: number; y: number;
+  /** Altura del suelo bajo la entidad (tiles). */
+  z?: number;
   /** Índice base del grupo de 4 frames (abajo, arriba, izq, der). */
   sprite: number;
   /** Dirección de mirada en el mundo: 0 sur(+z), 1 norte(-z), 2 oeste(-x), 3 este(+x). */
   dir: number;
 }
 
-const STRIDE = 6; // pos3 uv2 shade1
+const STRIDE = 8; // pos3 uv2 shade1 duv2
 const SKY: [number, number, number] = [0.55, 0.76, 0.95];
 
 class MeshBuilder {
   v: number[] = [];
   /** Quad con 4 esquinas en orden CCW visto desde el frente. */
-  quad(p: number[][], idx: number, shade: number) {
+  quad(p: number[][], idx: number, shade: number, alt?: number) {
     const e = 0.02 / 16, cw = 1 / ATLAS_COLS, ch = 1 / ATLAS_ROWS;
     const u0 = (idx % ATLAS_COLS) * cw + e * cw * 16 / 16, v0 = Math.floor(idx / ATLAS_COLS) * ch;
     const u1 = u0 + cw - 2 * e * cw * 16 / 16, v1 = v0 + ch;
     const uv = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
-    for (const i of [0, 1, 2, 0, 2, 3]) this.v.push(p[i][0], p[i][1], p[i][2], uv[i][0], uv[i][1], shade);
+    const du = alt === undefined ? 0 : (alt % ATLAS_COLS) * cw - (idx % ATLAS_COLS) * cw;
+    const dv = alt === undefined ? 0 : Math.floor(alt / ATLAS_COLS) * ch - Math.floor(idx / ATLAS_COLS) * ch;
+    for (const i of [0, 1, 2, 0, 2, 3]) this.v.push(p[i][0], p[i][1], p[i][2], uv[i][0], uv[i][1], shade, du, dv);
   }
   get data() { return new Float32Array(this.v); }
 }
@@ -108,6 +112,7 @@ export class Renderer3D {
           { shaderLocation: 0, offset: 0, format: "float32x3" },
           { shaderLocation: 1, offset: 12, format: "float32x2" },
           { shaderLocation: 2, offset: 20, format: "float32" },
+          { shaderLocation: 3, offset: 24, format: "float32x2" },
         ] }],
       },
       fragment: { module, entryPoint: "fs", targets: [{ format }] },
@@ -139,10 +144,17 @@ export class Renderer3D {
     });
   }
 
-  /** Construye la malla estática del mapa (terreno, muros, árboles y matas). */
-  setWorld(tiles: Uint8Array, w: number, h: number) {
+  /** Altura (en tiles) del terreno en la casilla: tipo de tile + capa de alturas editable. */
+  static cellHeight(tiles: Uint8Array, heights: Int8Array | null, w: number, h: number, x: number, y: number) {
+    if (x < 0 || y < 0 || x >= w || y >= h) return -2;
+    const i = y * w + x;
+    return (TILE_HEIGHT[tiles[i]] ?? 0) + (heights ? heights[i] * 0.25 : 0);
+  }
+
+  /** Construye la malla estática del mapa (terreno con alturas, muros, árboles, objetos y matas). */
+  setWorld(tiles: Uint8Array, objects: Uint8Array, heights: Int8Array | null, w: number, h: number) {
     const m = new MeshBuilder();
-    const H = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? -2 : (TILE_HEIGHT[tiles[y * w + x]] ?? 0));
+    const H = (x: number, y: number) => Renderer3D.cellHeight(tiles, heights, w, h, x, y);
     const T = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? -1 : tiles[y * w + x]);
     let seed = 7;
     const rnd = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -152,27 +164,32 @@ export class Renderer3D {
       m.quad([[cx, base, cz + r], [cx, base, cz - r], [cx, base + size, cz - r], [cx, base + size, cz + r]], idx, 0.92);
     };
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const t = tiles[y * w + x];
-      const top = TILE_HEIGHT[t] ?? 0;
+      const t = tiles[y * w + x], obj = objects[y * w + x];
+      const top = H(x, y);
       const topTex = t === 4 ? 0 : t === 8 ? 2 : t;
       const isBlock = t === 5 || t === 11;
-      m.quad([[x, top, y + 1], [x + 1, top, y + 1], [x + 1, top, y], [x, top, y]], topTex, isBlock && t === 5 ? 0.7 : 1);
-      const sides: [number, number, number, number[][], number][] = [
-        [0, 1, 0.9, [[x, 0, y + 1], [x + 1, 0, y + 1], [x + 1, 0, y + 1], [x, 0, y + 1]], 0], // sur
-        [0, -1, 0.78, [[x + 1, 0, y], [x, 0, y], [x, 0, y], [x + 1, 0, y]], 0],               // norte
-        [-1, 0, 0.66, [[x, 0, y], [x, 0, y + 1], [x, 0, y + 1], [x, 0, y]], 0],               // oeste
-        [1, 0, 0.74, [[x + 1, 0, y + 1], [x + 1, 0, y], [x + 1, 0, y], [x + 1, 0, y + 1]], 0], // este
+      const alt = TILE_ANIM[topTex] !== undefined ? TILE_ANIM[topTex] : undefined;
+      m.quad([[x, top, y + 1], [x + 1, top, y + 1], [x + 1, top, y], [x, top, y]], atlasIndex(topTex), isBlock && t === 5 ? 0.7 : 1, alt);
+      const sides: [number, number, number, number[][]][] = [
+        [0, 1, 0.9, [[x, 0, y + 1], [x + 1, 0, y + 1]]], // sur
+        [0, -1, 0.78, [[x + 1, 0, y], [x, 0, y]]],       // norte
+        [-1, 0, 0.66, [[x, 0, y], [x, 0, y + 1]]],       // oeste
+        [1, 0, 0.74, [[x + 1, 0, y + 1], [x + 1, 0, y]]], // este
       ];
       for (const [dx, dy, sh, e] of sides) {
         const nh = H(x + dx, y + dy);
         if (nh >= top) continue;
-        const tex = T(x + dx, y + dy) === 8 && t === 5 ? 8 : t === 3 || t === 4 || t === 8 ? 0 : t === 5 || t === 11 ? t : 0;
+        const tex = T(x + dx, y + dy) === 8 && t === 5 ? 8 : t === 5 || t === 11 ? t : t === 3 ? 3 : 0;
         const bottom = Math.max(nh, -2);
-        m.quad([[e[0][0], bottom, e[0][2]], [e[1][0], bottom, e[1][2]], [e[1][0], top, e[1][2]], [e[0][0], top, e[0][2]]], t === 3 ? 3 : tex, sh);
+        m.quad([[e[0][0], bottom, e[0][2]], [e[1][0], bottom, e[1][2]], [e[1][0], top, e[1][2]], [e[0][0], top, e[0][2]]], tex, sh);
       }
-      if (t === 4) cross(x + 0.5, y + 0.5, 1.9, BB_TREE);
-      else if (t === 1) for (let k = 0; k < 3; k++) cross(x + 0.2 + rnd() * 0.6, y + 0.2 + rnd() * 0.6, 0.55, BB_TUFT);
-      else if (t === 6) for (let k = 0; k < 2; k++) cross(x + 0.2 + rnd() * 0.6, y + 0.2 + rnd() * 0.6, 0.4, BB_FLOWER);
+      if (obj) {
+        const o: Record<number, [number, number]> = { 12: [1.9, BB_TREE], 13: [0.9, BB_TUFT], 14: [0.8, BB_FLOWER], 15: [0.95, BB_ROCK], 16: [1.0, BB_FENCE], 17: [0.95, BB_SIGN] };
+        const [size, idx] = o[obj] ?? [0.9, BB_TUFT];
+        cross(x + 0.5, y + 0.5, size, idx, top);
+      } else if (t === 4) cross(x + 0.5, y + 0.5, 1.9, BB_TREE, top);
+      else if (t === 1) for (let k = 0; k < 3; k++) cross(x + 0.2 + rnd() * 0.6, y + 0.2 + rnd() * 0.6, 0.55, BB_TUFT, top);
+      else if (t === 6) for (let k = 0; k < 2; k++) cross(x + 0.2 + rnd() * 0.6, y + 0.2 + rnd() * 0.6, 0.4, BB_FLOWER, top);
     }
     const data = m.data;
     this.world?.destroy();
@@ -188,7 +205,7 @@ export class Renderer3D {
     const view = lookAt(eye, [cam.x, 0.5, cam.z]);
     const vp = mul(perspective((40 * Math.PI) / 180, this.w / this.h, 0.1, 80), view);
     this.device.queue.writeBuffer(this.ubuf, 0, vp.buffer as ArrayBuffer, vp.byteOffset, 64);
-    this.device.queue.writeBuffer(this.ubuf, 64, new Float32Array([eye[0], eye[1], eye[2], 1, SKY[0], SKY[1], SKY[2], 1, cam.dist + 5, cam.dist + 22, 0, 0]));
+    this.device.queue.writeBuffer(this.ubuf, 64, new Float32Array([eye[0], eye[1], eye[2], 1, SKY[0], SKY[1], SKY[2], 1, cam.dist + 5, cam.dist + 22, Math.floor(performance.now() / ANIM_MS) % 2, 0]));
 
     // Billboards: ejes del plano de pantalla (cilíndrico alrededor de Y)
     const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
@@ -201,7 +218,8 @@ export class Renderer3D {
       const toward = -(dvec[0] * fx + dvec[1] * fz); // >0: mira hacia la cámara
       const side = dvec[0] * rx + dvec[1] * rz;       // >0: mira a la derecha de pantalla
       const frame = toward > 0.7071 ? 0 : toward < -0.7071 ? 1 : side > 0 ? 3 : 2;
-      dyn.quad([[cx - rx * hw, 0, cz - rz * hw], [cx + rx * hw, 0, cz + rz * hw], [cx + rx * hw, hh, cz + rz * hw], [cx - rx * hw, hh, cz - rz * hw]], e.sprite + frame, 1);
+      const z = e.z ?? 0;
+      dyn.quad([[cx - rx * hw, z, cz - rz * hw], [cx + rx * hw, z, cz + rz * hw], [cx + rx * hw, z + hh, cz + rz * hw], [cx - rx * hw, z + hh, cz - rz * hw]], e.sprite + frame, 1);
     }
     const dd = dyn.data.subarray(0, Renderer3D.DYN_MAX * STRIDE);
     if (dd.length) this.device.queue.writeBuffer(this.dyn, 0, dd);

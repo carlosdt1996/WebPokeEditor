@@ -60,6 +60,6 @@ export async function exportGameHtml(project: unknown): Promise<Blob> {
   inline.type = "module";
   inline.textContent = code.replace(/<\/script/gi, "<\\/script");
   mod.replaceWith(data, inline);
-  doc.querySelectorAll('link[rel="modulepreload"]').forEach((n) => n.remove());
+  doc.querySelectorAll('link[rel="modulepreload"], link[rel="manifest"]').forEach((n) => n.remove());
   return new Blob(["<!doctype html>\n" + doc.documentElement.outerHTML], { type: "text/html" });
 }

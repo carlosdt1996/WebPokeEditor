@@ -21,6 +21,14 @@ interface Exports {
   engine_steps(): number;
   engine_rand(max: number): number;
   engine_is_solid(t: number): number;
+  engine_objects_ptr(): number;
+  vm_code_ptr(): number;
+  vm_load(n: number): void;
+  vm_run(): number;
+  vm_arg(i: number): number;
+  vm_flag_get(id: number): number;
+  vm_flag_set(id: number, on: number): void;
+  vm_flags_reset(): void;
   engine_clear_blockers(): void;
   engine_set_blocker(x: number, y: number, v: number): void;
   engine_walkable(x: number, y: number): number;
@@ -51,10 +59,34 @@ export class Engine {
     return new Uint8Array(this.x.memory.buffer, this.x.engine_tiles_ptr(), this.width * this.height);
   }
 
+  /** Capa de objetos (0 = vacío), vista directa sobre la memoria WASM. */
+  get objects(): Uint8Array {
+    return new Uint8Array(this.x.memory.buffer, this.x.engine_objects_ptr(), this.width * this.height);
+  }
+
+  // ----- VM de scripts (Rust) -----
+  private flagIds = new Map<string, number>();
+  /** Id estable (0–255) de una marca por nombre. */
+  flagId(name: string): number {
+    let id = this.flagIds.get(name);
+    if (id === undefined) { id = this.flagIds.size % 256; this.flagIds.set(name, id); }
+    return id;
+  }
+  flagsReset() { this.flagIds.clear(); this.x.vm_flags_reset(); }
+  hasFlag(name: string) { return this.x.vm_flag_get(this.flagId(name)) === 1; }
+  setFlag(name: string, on: boolean) { this.x.vm_flag_set(this.flagId(name), on ? 1 : 0); }
+  vmLoad(words: Uint32Array) {
+    new Uint32Array(this.x.memory.buffer, this.x.vm_code_ptr(), words.length).set(words);
+    this.x.vm_load(words.length / 4);
+  }
+  vmRun() { return this.x.vm_run(); }
+  vmArg(i: number) { return this.x.vm_arg(i); }
+
   reset(w: number, h: number, seed = 1) { this.x.engine_reset(w, h, seed >>> 0); }
-  loadMap(w: number, h: number, tiles: Uint8Array, seed = 1) {
+  loadMap(w: number, h: number, tiles: Uint8Array, seed = 1, objects?: Uint8Array) {
     this.reset(w, h, seed);
     this.tiles.set(tiles.subarray(0, w * h));
+    if (objects) this.objects.set(objects.subarray(0, w * h));
   }
   setTile(x: number, y: number, t: number) { this.x.engine_set_tile(x, y, t); }
   getTile(x: number, y: number) { return this.x.engine_get_tile(x, y); }

@@ -19,5 +19,7 @@ Que un creador sin programar pueda hacer cinemáticas, tiendas, puzles, misiones
 ## Extensión
 Plugins en WASM (sandbox) o JS limitado para añadir comandos. Ver ADR-0005 (pendiente).
 
-## Implementación actual (`packages/editor/src/script.ts`)
-Lenguaje de líneas para NPCs de tipo *Script*: `say`, `give`, `heal`, `flag/unflag`, `if/ifnot/else/end`, `battle`, `givemon`, `warp`. Se compila a instrucciones con saltos y se ejecuta de forma asíncrona (cede en diálogos y combates). Las marcas viven en el estado de la partida. El proyecto valida sintaxis y referencias (especies, mapas). Pendiente: triggers por casilla, variables numéricas y migrar la VM a Rust.
+## Implementación actual
+- **Parser/compilador** (`packages/editor/src/script.ts`, TypeScript): lenguaje de líneas (`say`, `give <objeto>`, `heal`, `flag/unflag`, `if/ifnot/else/end`, `battle`, `givemon`, `warp`) → bytecode de 4 palabras por instrucción + tabla de cadenas. Valida sintaxis y, desde `project.ts`, las referencias (especies, mapas, objetos).
+- **VM** (`crates/engine-core`, Rust): ejecuta el control de flujo (saltos, condicionales) y guarda las **marcas** (256) en memoria WASM; *cede* (yield) en cada operación con efecto (`say`, `give`, `heal`, `battle`, `givemon`, `warp`) y el host (`game.ts`) la resuelve de forma asíncrona antes de reanudarla. Un límite de pasos protege de bucles. Ver [ADR-0007](../adr/0007-script-vm-en-rust.md).
+- Pendiente: triggers por casilla, variables numéricas y bucles.

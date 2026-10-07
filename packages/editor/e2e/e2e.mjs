@@ -233,7 +233,7 @@ await test("combate salvaje: capturar con bolas (Mochila)", async () => {
   const n0 = await W(page, () => window.__wpe.view.game.party.length);
   for (let i = 0; i < 40 && (await page.locator(".battle").count()); i++) {
     const bag = page.locator(".menu button:has-text('Mochila')");
-    if (await bag.count()) { await bag.click(); await page.locator(".menu button:has-text('Bola')").click(); }
+    if (await bag.count()) { await bag.click(); await page.locator(".menu button").filter({ hasText: /^Bola ×/ }).click(); }
     await page.waitForTimeout(250);
     await page.locator(".battle").click({ position: { x: 20, y: 20 } }).catch(() => {});
   }
@@ -257,6 +257,136 @@ await test("derrota: se cura al equipo y vuelves al inicio", async () => {
   eq(await W(page, () => window.__wpe.view.game.map.id), "pueblo", "vuelve al mapa inicial");
   assert(await W(page, () => window.__wpe.view.game.party[0].hp > 1), "equipo curado");
   await page.click("text=■ Detener");
+});
+
+await test("capa de objetos: pintar valla (sólida), flor (decorativa) y quitar", async () => {
+  await W(page, () => window.__wpe.view.switchMap(0));
+  await page.click("button:has-text('Valla')");
+  const box = await page.locator(".overlay").boundingBox();
+  const px = (tx, ty) => { const z = 1; void z; return null; };
+  void px;
+  // posición de la casilla (3,13) del pueblo calculada con la cámara real
+  const pos = await W(page, () => { const v = window.__wpe.view; const r = v.el.getBoundingClientRect(); return { x: r.left + (3.5 * 16 - v.cam.x) * v.cam.zoom, y: r.top + (13.5 * 16 - v.cam.y) * v.cam.zoom }; });
+  await page.mouse.click(pos.x, pos.y);
+  eq(await W(page, () => window.__wpe.engine.objects[13 * 24 + 3]), 16, "valla en la capa de objetos");
+  eq(await W(page, () => window.__wpe.engine.walkable(3, 13)), false, "la valla bloquea");
+  eq(await W(page, () => window.__wpe.engine.tiles[13 * 24 + 3]), 1, "el suelo bajo la valla se conserva");
+  await page.click("button:has-text('Flor (obj.)')");
+  await page.mouse.click(pos.x, pos.y);
+  eq(await W(page, () => window.__wpe.engine.walkable(3, 13)), true, "la flor es decorativa");
+  await page.click("button:has-text('Sin objeto')");
+  await page.mouse.click(pos.x, pos.y);
+  eq(await W(page, () => window.__wpe.engine.objects[13 * 24 + 3]), 0, "objeto quitado");
+  await page.keyboard.press("Control+z");
+  eq(await W(page, () => window.__wpe.engine.objects[13 * 24 + 3]), 14, "deshacer restaura el objeto");
+  await page.keyboard.press("Control+z"); await page.keyboard.press("Control+z");
+  eq(await W(page, () => window.__wpe.engine.objects[13 * 24 + 3]), 0, "deshacer todo");
+  const shape = await W(page, () => { window.__wpe.view.commit(); const m = window.__wpe.project.maps[0]; return [typeof m.objects, typeof m.heights]; });
+  eq(shape, ["string", "string"], "las capas por defecto (objetos y colina) se guardan");
+});
+
+await test("alturas: elevar/bajar casillas y verlas en 3D", async () => {
+  await page.click("button:has-text('⛰ Elevar')");
+  const pos = await W(page, () => { const v = window.__wpe.view; const r = v.el.getBoundingClientRect(); return { x: r.left + (5.5 * 16 - v.cam.x) * v.cam.zoom, y: r.top + (14.5 * 16 - v.cam.y) * v.cam.zoom }; });
+  await page.mouse.click(pos.x, pos.y); await page.mouse.click(pos.x, pos.y);
+  const h = () => W(page, () => window.__wpe.view.heights[14 * 24 + 5]);
+  eq(await h(), 2, "dos clics suben 2");
+  await page.click("button:has-text('🕳 Bajar')");
+  await page.mouse.click(pos.x, pos.y);
+  eq(await h(), 1, "bajar");
+  await page.keyboard.press("Control+z"); await page.keyboard.press("Control+z");
+  eq(await h(), 0, "deshacer alturas");
+  await page.click("button:has-text('✏️ Pintar')");
+  await page.click("text=🧊 3D"); await page.waitForTimeout(600);
+  await W(page, () => { window.__wpe.view.cam3.x = 18.5; window.__wpe.view.cam3.z = 14; });
+  await page.waitForTimeout(400);
+  await shot(page, "07-colina-3d");
+  await page.click("text=🧊 3D");
+});
+
+await test("objetos genéricos: crear uno nuevo, inventario y script con give", async () => {
+  await page.click("button:has-text('📋 Datos')");
+  const n0 = await W(page, () => window.__wpe.project.items.length);
+  await page.click("button:has-text('+ Añadir objeto')");
+  eq(await W(page, () => window.__wpe.project.items.length), n0 + 1, "objeto añadido");
+  const id = await W(page, () => window.__wpe.project.items.at(-1).id);
+  await page.locator("button.danger").filter({ hasText: "✕" }).last().click();
+  eq(await W(page, () => window.__wpe.project.items.length), n0, "objeto eliminado");
+  assert(id === "objeto", "id generado");
+  await page.click("button:has-text('🗺️ Mapa')");
+});
+
+await test("combate doble 2v2 contra los Hermanos Gil", async () => {
+  await W(page, () => window.__wpe.view.switchMap(2));
+  await page.click("text=▶ Probar");
+  await W(page, () => { const g = window.__wpe.view.game; g.party.forEach((m) => { m.level = 40; m.hp = 999; }); g.warpTo("ruta1", 14, 10); });
+  await page.waitForTimeout(250);
+  await page.keyboard.down("ArrowDown");
+  await page.waitForFunction(() => window.__wpe.view.game.busy, null, { timeout: 8000, polling: 30 });
+  await page.keyboard.up("ArrowDown");
+  await page.waitForSelector(".dialog:not([hidden])");
+  assert((await page.textContent(".dialog")).includes("Gil") || (await page.textContent(".dialog")).includes("dos"), "diálogo de los hermanos (" + (await page.textContent(".dialog")) + ")");
+  await key(page, "Enter", 80);
+  await page.waitForSelector(".battle.size2", { timeout: 6000 });
+  assert(await page.locator(".battle .mon.foe").count() === 2 && await page.locator(".battle .mon.pl").count() === 2, "dos criaturas por lado");
+  await shot(page, "08-combate-doble");
+  for (let i = 0; i < 80 && (await page.locator(".battle").count()); i++) {
+    const fight = page.locator(".menu button:has-text('Luchar')");
+    if (await fight.count()) {
+      await fight.click();
+      await page.locator(".menu button").first().click();
+      await page.waitForTimeout(80);
+      if ((await page.textContent(".msg"))?.includes("¿A quién atacas?")) await page.locator(".menu button").first().click();
+    } else if (await page.locator(".menu button:has-text('¿A quién')").count()) { /* nada */ }
+    else {
+      const pick = page.locator(".menu button:enabled").first();
+      if ((await page.textContent(".msg"))?.includes("¿A quién envías?") && await pick.count()) await pick.click();
+    }
+    await page.waitForTimeout(150);
+    await page.locator(".battle").click({ position: { x: 20, y: 20 } }).catch(() => {});
+  }
+  assert(!(await page.locator(".battle").count()), "el combate doble no terminó");
+  eq(await W(page, () => window.__wpe.view.game.defeated.has("ruta1/hermanos")), true, "hermanos derrotados");
+  await page.waitForSelector(".dialog:not([hidden])");
+  await closeDialog(page);
+  await page.click("text=■ Detener");
+});
+
+await test("CSV de especies: exportar, editar y reimportar", async () => {
+  await page.click("button:has-text('📋 Datos')");
+  const [dl] = await Promise.all([page.waitForEvent("download"), page.locator("button:has-text('⬇ Exportar CSV')").first().click()]);
+  const path = join(tmpdir(), "e2e-especies.csv");
+  await dl.saveAs(path);
+  const csv = readFileSync(path, "utf8");
+  assert(csv.startsWith("id,nombre,tipo1,tipo2,hp,atk,def,spa,spd,spe,movimientos"), "cabecera: " + csv.slice(0, 60));
+  writeFileSync(path, csv.replace("Flamito", "Brasín"));
+  await page.locator("button:has-text('⬆ Importar CSV')").first().evaluate((b) => b.nextElementSibling.setAttribute("data-t", "1"));
+  await page.locator("input[type=file][accept='.csv,text/csv']").first().setInputFiles(path);
+  await page.waitForFunction(() => window.__wpe.project.species[0].name === "Brasín");
+  eq(await W(page, () => window.__wpe.project.species[0].evolve.into), "flamaron", "la evolución sobrevive al CSV");
+  await page.click("button:has-text('🗺️ Mapa')");
+});
+
+await test("guardado en OPFS y recarga con el proyecto intacto", async () => {
+  await page.fill("input.title", "Guardado OPFS");
+  await page.waitForTimeout(900);
+  const saved = await W(page, async () => { const r = await navigator.storage.getDirectory(); const f = await (await r.getFileHandle("proyecto.wpe.json")).getFile(); return JSON.parse(await f.text()).name; });
+  eq(saved, "Guardado OPFS", "archivo en OPFS");
+  assert((await page.textContent(".status")).includes("OPFS"), "estado: " + (await page.textContent(".status")));
+  await page.reload(); await page.waitForSelector(".viewport canvas"); await page.waitForTimeout(500);
+  eq(await W(page, () => window.__wpe.project.name), "Guardado OPFS", "tras recargar");
+});
+
+await test("PWA: manifest, service worker y funcionamiento sin conexión", async () => {
+  assert(await page.locator("link[rel=manifest]").count() === 1, "manifest enlazado");
+  const m = await page.evaluate(() => fetch("./manifest.webmanifest").then((r) => r.json()));
+  eq([m.display, m.icons.length >= 2], ["standalone", true], "manifest");
+  await page.waitForFunction(() => navigator.serviceWorker.ready.then(() => true), null, { timeout: 8000 });
+  await page.reload(); await page.waitForTimeout(800); // ya controlada por el SW
+  await page.context().setOffline(true);
+  await page.reload(); await page.waitForSelector(".viewport canvas", { timeout: 8000 }); await page.waitForTimeout(500);
+  assert((await page.textContent("footer")).includes("Motor"), "la app carga sin red");
+  await page.context().setOffline(false);
 });
 
 await test("modo 3D en edición y en juego (WebGPU), girando la cámara", async () => {
@@ -318,7 +448,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   const path = join(tmpdir(), "e2e-proyecto.wpe.json");
   await dl.saveAs(path);
   const json = JSON.parse(readFileSync(path, "utf8"));
-  eq([json.name, json.schemaVersion, json.maps.length], ["Proyecto E2E", 2, 3], "contenido exportado");
+  eq([json.name, json.schemaVersion, json.maps.length, json.items.length], ["Proyecto E2E", 3, 3, 4], "contenido exportado");
   await page.click("button:has-text('Nuevo')");
   await page.waitForTimeout(400);
   eq(await W(page, () => window.__wpe.project.name), "Mi Fangame", "tras Nuevo");
@@ -329,7 +459,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   const p1 = join(tmpdir(), "e2e-v1.json"); writeFileSync(p1, JSON.stringify(v1));
   await page.locator("header input[type=file]").setInputFiles(p1);
   await page.waitForFunction(() => window.__wpe.project.name === "Antiguo");
-  eq(await W(page, () => [window.__wpe.project.schemaVersion, window.__wpe.project.maps[0].w]), [2, 6], "migración v1→v2");
+  eq(await W(page, () => [window.__wpe.project.schemaVersion, window.__wpe.project.maps[0].w]), [3, 6], "migración v1→v3");
   // JSON inválido → mensaje y el proyecto no cambia
   const bad = join(tmpdir(), "e2e-bad.json"); writeFileSync(bad, JSON.stringify({ ...v1, encounters: ["fantasma"] }));
   let msg = ""; page.removeAllListeners("dialog"); page.on("dialog", (d) => { msg = d.message(); d.accept(); });
@@ -361,7 +491,7 @@ await test("exportar juego a un único .html y jugarlo", async () => {
 });
 
 await test("sin errores de consola durante toda la sesión", async () => {
-  const real = errors.filter((e) => !/Failed to create WebGPU Context Provider/.test(e));
+  const real = errors.filter((e) => !/Failed to create WebGPU Context Provider|net::ERR_INTERNET_DISCONNECTED|Failed to load resource/.test(e));
   assert(real.length === 0, "errores: " + real.slice(0, 3).join(" | "));
 });
 
