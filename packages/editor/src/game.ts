@@ -21,6 +21,8 @@ const OPPOSITE = [1, 0, 3, 2];
 export class Game {
   party: Mon[];
   inv: Record<string, number>;
+  /** Dinero del jugador; los scripts lo ven como la variable `money`. */
+  money: number;
   defeated = new Set<string>();
   mapIndex = 0;
   /** true mientras hay diálogo/combate/transición: el bucle no avanza la simulación. */
@@ -31,6 +33,7 @@ export class Game {
   constructor(private p: Project, private e: Engine, private host: Host) {
     this.party = p.party.map((t) => makeMon(p, t.species, t.level, t.held));
     this.inv = { ...p.inventory };
+    this.money = p.money ?? 0;
     e.flagsReset();
   }
 
@@ -48,7 +51,7 @@ export class Game {
     const r = parseScript(src);
     if (!r.ok) { this.host.say(`Script de salida de ${this.map.name} con errores: ${r.errors[0]}`); return; }
     this.enterDepth++;
-    try { this.refreshBuiltins(); await runScript(r.code, this.scriptCtx(null, null), this.e); }
+    try { await this.exec(r.code, this.scriptCtx(null, null)); }
     catch (err) { this.host.say((err as Error).message); }
     finally { this.enterDepth--; }
   }
@@ -61,7 +64,7 @@ export class Game {
     const r = parseScript(src);
     if (!r.ok) { this.host.say(`Script de entrada de ${this.map.name} con errores: ${r.errors[0]}`); return; }
     this.enterDepth++;
-    try { this.refreshBuiltins(); await runScript(r.code, this.scriptCtx(null, null), this.e); }
+    try { await this.exec(r.code, this.scriptCtx(null, null)); }
     catch (err) { this.host.say((err as Error).message); }
     finally { this.enterDepth--; }
   }
@@ -99,13 +102,21 @@ export class Game {
     this.e.setVar("steps", this.e.steps);
     this.e.setVar("party", this.party.length);
     this.e.setVar("level", this.party[0]?.level ?? 0);
+    this.e.setVar("money", this.money);
+    for (const it of this.p.items) this.e.setVar("item_" + it.id, this.inv[it.id] ?? 0);
+  }
+
+  /** Ejecuta un guion con las variables predefinidas al día y vuelve a leer el dinero (los guiones lo modifican con `add money`). */
+  private async exec(code: Parameters<typeof runScript>[0], ctx: ScriptCtx) {
+    this.refreshBuiltins();
+    try { await runScript(code, ctx, this.e); }
+    finally { this.money = Math.max(0, this.e.getVar("money")); }
   }
 
   private async runTrigger(t: Trigger) {
     const r = parseScript(t.script);
     if (!r.ok) { this.host.say(`Disparador "${t.name}" con errores: ${r.errors[0]}`); return; }
-    this.refreshBuiltins();
-    try { await runScript(r.code, this.scriptCtx(null, null), this.e); }
+    try { await this.exec(r.code, this.scriptCtx(null, null)); }
     catch (err) { this.host.say((err as Error).message); }
   }
 
@@ -147,12 +158,14 @@ export class Game {
         healAll(this.p, this.party);
         sfx("heal");
         await this.host.dialog(npc.name, npc.lines.slice(1).length ? npc.lines.slice(1) : ["¡Listo!"]);
+      } else if (npc.kind === "shop") {
+        await this.shop(npc);
       } else if (npc.kind === "trainer") {
         if (this.defeated.has(this.key(npc))) await this.host.dialog(npc.name, npc.defeatedLines?.length ? npc.defeatedLines : ["..."]);
         else await this.challenge(npc);
       } else if (npc.kind === "script") {
         const r = parseScript(npc.script ?? "");
-        if (r.ok) { this.refreshBuiltins(); try { await runScript(r.code, this.scriptCtx(npc), this.e); } catch (err) { this.host.say((err as Error).message); } }
+        if (r.ok) { try { await this.exec(r.code, this.scriptCtx(npc)); } catch (err) { this.host.say((err as Error).message); } }
         else this.host.say(`Script de ${npc.name} con errores: ${r.errors[0]}`);
       } else await this.host.dialog(npc.name, npc.lines.length ? npc.lines : ["..."]);
     });
@@ -161,7 +174,7 @@ export class Game {
   private scriptCtx(npc: Npc | null, speaker = npc?.name ?? null): ScriptCtx {
     return {
       say: (lines) => this.host.dialog(speaker, lines),
-      give: (item, n) => { this.inv[item] = (this.inv[item] ?? 0) + n; sfx("heal"); this.host.say(`Recibes ${n} × ${this.p.items.find((i) => i.id === item)?.name ?? item}.`); },
+      give: (item, n) => { this.inv[item] = (this.inv[item] ?? 0) + n; this.e.setVar("item_" + item, this.inv[item]); sfx("heal"); this.host.say(`Recibes ${n} × ${this.p.items.find((i) => i.id === item)?.name ?? item}.`); },
       heal: () => { healAll(this.p, this.party); sfx("heal"); },
       battle: async (sp, lv) => { await this.fight([makeMon(this.p, sp, lv)]); },
       givemon: (sp, lv) => { if (this.party.length < 6) { this.party.push(makeMon(this.p, sp, lv)); sfx("catch"); this.host.say("¡Un nuevo compañero se une a tu equipo!"); } },
@@ -169,6 +182,39 @@ export class Game {
       choose: (o) => this.host.choose(o),
       equip: (item) => this.equip(item),
     };
+  }
+
+  /** Tienda: comprar (a precio de lista) y vender (a la mitad; los objetos clave no se venden). */
+  async shop(npc: Npc) {
+    const def = (id: string) => this.p.items.find((i) => i.id === id);
+    const stock = (npc.stock ?? []).map(def).filter((i): i is NonNullable<typeof i> => !!i && (i.price ?? 0) > 0);
+    await this.host.dialog(npc.name, [npc.lines[0] ?? "¡Bienvenido! ¿Qué te pongo?"]);
+    for (;;) {
+      const top = await this.host.choose([`Comprar`, `Vender`, `Salir  (${this.money} monedas)`]);
+      if (top === 0) {
+        const k = await this.host.choose([...stock.map((i) => `${i.name} (${i.price})`), "Volver"]);
+        const it = stock[k];
+        if (!it) continue;
+        if (this.money < it.price!) { await this.host.dialog(npc.name, ["No tienes suficientes monedas."]); continue; }
+        this.money -= it.price!;
+        this.inv[it.id] = (this.inv[it.id] ?? 0) + 1;
+        sfx("heal");
+        await this.host.dialog(npc.name, [`¡Gracias por tu compra de ${it.name}!`]);
+      } else if (top === 1) {
+        const mine = this.p.items.filter((i) => i.kind !== "key" && (i.price ?? 0) > 0 && (this.inv[i.id] ?? 0) > 0);
+        if (!mine.length) { await this.host.dialog(npc.name, ["No tienes nada que pueda comprarte."]); continue; }
+        const k = await this.host.choose([...mine.map((i) => `${i.name} ×${this.inv[i.id]} (${Math.floor(i.price! / 2)})`), "Volver"]);
+        const it = mine[k];
+        if (!it) continue;
+        this.inv[it.id]--;
+        this.money += Math.floor(it.price! / 2);
+        sfx("heal");
+        await this.host.dialog(npc.name, [`Te compro ${it.name} por ${Math.floor(it.price! / 2)} monedas.`]);
+      } else {
+        await this.host.dialog(npc.name, ["¡Vuelve cuando quieras!"]);
+        return;
+      }
+    }
   }
 
   /** Equipa un objeto del inventario a la primera criatura sin objeto (si todas llevan uno, cambia el de la primera). */
@@ -195,7 +241,7 @@ export class Game {
       this.defeated.add(this.key(n));
       await this.host.dialog(n.name, n.defeatedLines?.length ? n.defeatedLines : ["Me has vencido."]);
       const r = n.winScript ? parseScript(n.winScript) : null;
-      if (r?.ok) { this.refreshBuiltins(); try { await runScript(r.code, this.scriptCtx(n), this.e); } catch (err) { this.host.say((err as Error).message); } }
+      if (r?.ok) { try { await this.exec(r.code, this.scriptCtx(n)); } catch (err) { this.host.say((err as Error).message); } }
     }
   }
 

@@ -607,7 +607,7 @@ export class MapView {
     });
     this.map.npcs.forEach((n, i) => {
       const sel = this.selection?.kind === "npc" && this.selection.index === i;
-      g.strokeStyle = sel ? "#fff" : n.kind === "trainer" ? "#ff8a65" : n.kind === "healer" ? "#81c784" : "#fff59d";
+      g.strokeStyle = sel ? "#fff" : n.kind === "trainer" ? "#ff8a65" : n.kind === "healer" ? "#81c784" : n.kind === "shop" ? "#4fc3f7" : "#fff59d";
       g.lineWidth = sel ? 3 : 1.5;
       g.strokeRect(sx(n.x) + 1, sy(n.y) + 1, ts - 2, ts - 2);
     });

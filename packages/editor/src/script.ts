@@ -45,11 +45,18 @@ get <lista> <índice|var> <txt> copia el elemento (0, 1, 2… o una variable) a 
 pick <lista> <txt>             elige un elemento al azar (reproducible)
 upper <txt> · lower <txt>      cambia a mayúsculas/minúsculas · strlen <txt> <var> longitud
 streq <txt> <texto> <var>      var = 1 si el texto es igual · contains <txt> <texto> <var> si lo contiene
+nlist <nombre> 1 | 5 | 9       lista numérica · npush/npop/nclear <lista> [n|var]
+nlen <lista> <var> · nget <lista> <índice|var> <var> · nset <lista> <índice|var> <n|var>
+nsum <lista> <var> · nmax <lista> <var> · nsort <lista> (ascendente)
+dict <nombre> clave=valor | k2=v2   diccionario de textos · dset <dic> <clave> <valor>
+dget <dic> <clave> <txt> · dhas <dic> <clave> <var> · ddel <dic> <clave> · dlen <dic> <var>
+substr <txt> <inicio> <largo> <txt-destino>   recorta · replace <txt> <buscar> | <poner> sustituye
+num <txt> <var>                pasa un texto a número (0 si no lo es)
 equip <objeto>                 equipa un objeto del inventario a la primera criatura libre
 battle <especie> <nivel>   combate contra una criatura
 givemon <especie> <nivel>  añade una criatura al equipo
 warp <mapa> <x> <y>        teletransporta al jugador
-Variables predefinidas al empezar: steps (pasos), party (nº de criaturas), level (nivel de la primera).
+Variables predefinidas: steps (pasos), party (nº de criaturas), level (nivel de la primera), money (monedas; «add money -50» cobra y «add money 50» paga) e item_<id> (cuántas unidades tienes de un objeto, p. ej. «if item_llave >= 1»).
 # línea de comentario`;
 
 export type ParseResult = { ok: true; code: Instr[] } | { ok: false; errors: string[] };
@@ -177,6 +184,48 @@ export function parseScript(src: string): ParseResult {
         if (n && v) code.push({ op: "host", cmd, args: [n, rest.slice(1, -1).join(" "), v] });
         break;
       }
+      case "nlist": {
+        const n = ident(rest[0]);
+        const vals = rest.slice(1).join(" ").split("|").map((x) => x.trim()).filter(Boolean);
+        if (!vals.length || vals.some((v) => isNaN(int(v)))) { err("uso: nlist <nombre> 1 | 5 | 9 (solo enteros)"); break; }
+        if (n) code.push({ op: "host", cmd: "nlist", args: [n, ...vals] });
+        break;
+      }
+      case "npush": case "nclear": case "npop": {
+        const n = ident(rest[0]);
+        if (cmd === "npush" && rest.length < 2) { err("uso: npush <lista> <n|var>"); break; }
+        if (n) code.push({ op: "host", cmd, args: cmd === "npush" ? [n, rest[1]] : [n] });
+        break;
+      }
+      case "nlen": case "nsum": case "nmax": { const n = ident(rest[0]), v = ident(rest[1]); if (rest.length < 2) { err(`uso: ${cmd} <lista> <variable>`); break; } if (n && v) code.push({ op: "host", cmd, args: [n, v] }); break; }
+      case "nsort": { const n = ident(rest[0]); if (n) code.push({ op: "host", cmd, args: [n] }); break; }
+      case "nget": { const l = ident(rest[0]), v = ident(rest[2]); if (rest.length < 3) { err("uso: nget <lista> <índice|var> <variable>"); break; } if (l && v) code.push({ op: "host", cmd, args: [l, rest[1], v] }); break; }
+      case "nset": { const l = ident(rest[0]); if (rest.length < 3) { err("uso: nset <lista> <índice|var> <n|var>"); break; } if (l) code.push({ op: "host", cmd, args: [l, rest[1], rest[2]] }); break; }
+      case "dict": {
+        const n = ident(rest[0]);
+        const pairs = rest.slice(1).join(" ").split("|").map((x) => x.trim()).filter(Boolean);
+        if (!pairs.length || pairs.some((p) => !p.includes("="))) { err("uso: dict <nombre> clave=valor | clave=valor"); break; }
+        if (n) code.push({ op: "host", cmd: "dict", args: [n, ...pairs] });
+        break;
+      }
+      case "dset": { const d = ident(rest[0]); if (rest.length < 3) { err("uso: dset <dic> <clave> <valor>"); break; } if (d) code.push({ op: "host", cmd, args: [d, rest[1], rest.slice(2).join(" ")] }); break; }
+      case "dget": case "dhas": { const d = ident(rest[0]), v = ident(rest[2]); if (rest.length < 3) { err(`uso: ${cmd} <dic> <clave> <variable>`); break; } if (d && v) code.push({ op: "host", cmd, args: [d, rest[1], v] }); break; }
+      case "ddel": { const d = ident(rest[0]); if (rest.length < 2) { err("uso: ddel <dic> <clave>"); break; } if (d) code.push({ op: "host", cmd, args: [d, rest[1]] }); break; }
+      case "dlen": { const d = ident(rest[0]), v = ident(rest[1]); if (rest.length < 2) { err("uso: dlen <dic> <variable>"); break; } if (d && v) code.push({ op: "host", cmd, args: [d, v] }); break; }
+      case "substr": {
+        const t = ident(rest[0]), o = ident(rest[3]);
+        if (rest.length < 4 || isNaN(int(rest[1])) || isNaN(int(rest[2]))) { err("uso: substr <txt> <inicio> <largo> <destino>"); break; }
+        if (t && o) code.push({ op: "host", cmd, args: [t, rest[1], rest[2], o] });
+        break;
+      }
+      case "replace": {
+        const t = ident(rest[0]);
+        const [from, to] = rest.slice(1).join(" ").split("|").map((x) => x.trim());
+        if (!from || to === undefined) { err("uso: replace <txt> <buscar> | <poner>"); break; }
+        if (t) code.push({ op: "host", cmd, args: [t, from, to] });
+        break;
+      }
+      case "num": { const t = ident(rest[0]), v = ident(rest[1]); if (rest.length < 2) { err("uso: num <txt> <variable>"); break; } if (t && v) code.push({ op: "host", cmd, args: [t, v] }); break; }
       case "equip": { const n = ident(rest[0]); if (n) code.push({ op: "host", cmd: "equip", args: [n] }); break; }
       case "break": {
         let loop: Frame | undefined;
@@ -310,6 +359,9 @@ function hostOp(parts: string[], engine: Engine, interp: (t: string) => string, 
   const list = (n: string) => engine.lists.get(n) ?? engine.lists.set(n, []).get(n)!;
   const str = (n: string) => engine.getStr(n) ?? "";
   const idxOf = (v: string) => (/^-?\d+$/.test(v) ? +v : engine.getVar(v));
+  const numOf = idxOf;
+  const nlist = (n: string) => engine.nlists.get(n) ?? engine.nlists.set(n, []).get(n)!;
+  const dict = (n: string) => engine.dicts.get(n) ?? engine.dicts.set(n, new Map()).get(n)!;
   switch (cmd) {
     case "list": engine.lists.set(a[0], a.slice(1).map(interp)); break;
     case "push": list(a[0]).push(interp(a[1])); break;
@@ -323,6 +375,46 @@ function hostOp(parts: string[], engine: Engine, interp: (t: string) => string, 
     case "strlen": engine.setVar(a[1], str(a[0]).length); break;
     case "streq": engine.setVar(a[2], str(a[0]) === interp(a[1]) ? 1 : 0); break;
     case "contains": engine.setVar(a[2], str(a[0]).includes(interp(a[1])) ? 1 : 0); break;
+    case "nlist": engine.nlists.set(a[0], a.slice(1).map(Number)); break;
+    case "npush": nlist(a[0]).push(numOf(a[1])); break;
+    case "npop": nlist(a[0]).pop(); break;
+    case "nclear": engine.nlists.set(a[0], []); break;
+    case "nlen": engine.setVar(a[1], nlist(a[0]).length); break;
+    case "nget": engine.setVar(a[2], nlist(a[0])[numOf(a[1])] ?? 0); break;
+    case "nset": { const l = nlist(a[0]), i = numOf(a[1]); if (i >= 0 && i < l.length) l[i] = numOf(a[2]); break; }
+    case "nsum": engine.setVar(a[1], nlist(a[0]).reduce((x, y) => x + y, 0)); break;
+    case "nmax": { const l = nlist(a[0]); engine.setVar(a[1], l.length ? Math.max(...l) : 0); break; }
+    case "nsort": nlist(a[0]).sort((x, y) => x - y); break;
+    case "dict": engine.dicts.set(a[0], new Map(a.slice(1).map((p) => { const k = p.indexOf("="); return [interp(p.slice(0, k).trim()), interp(p.slice(k + 1).trim())] as [string, string]; }))); break;
+    case "dset": dict(a[0]).set(interp(a[1]), interp(a[2])); break;
+    case "dget": engine.setStr(a[2], dict(a[0]).get(interp(a[1])) ?? ""); break;
+    case "dhas": engine.setVar(a[2], dict(a[0]).has(interp(a[1])) ? 1 : 0); break;
+    case "ddel": dict(a[0]).delete(interp(a[1])); break;
+    case "dlen": engine.setVar(a[1], dict(a[0]).size); break;
+    case "substr": engine.setStr(a[3], str(a[0]).substr(numOf(a[1]), numOf(a[2]))); break;
+    case "replace": engine.setStr(a[0], str(a[0]).split(interp(a[1])).join(interp(a[2]))); break;
+    case "num": { const n = parseInt(str(a[0]), 10); engine.setVar(a[1], Number.isFinite(n) ? n : 0); break; }
     case "equip": ctx.equip(a[0]); break;
   }
+}
+
+/** Guion compilado en formato portable (JSON): sirve para precompilar al exportar y evitar volver a analizar el texto. */
+export function serializeScript(code: Instr[]): string {
+  return JSON.stringify({ v: 1, code });
+}
+const JUMPS = new Set(["jif", "jcmp", "jmp", "call"]);
+const OPS = new Set(["say", "give", "heal", "flag", "unflag", "set", "add", "jif", "jcmp", "jmp", "battle", "givemon", "warp", "call", "ret", "choice", "setstr", "host"]);
+/** Lee un guion serializado y lo valida (operaciones conocidas y saltos dentro del programa); lanza un error si no es válido. */
+export function deserializeScript(json: string): Instr[] {
+  const d = JSON.parse(json) as { v?: number; code?: unknown };
+  if (d?.v !== 1 || !Array.isArray(d.code)) throw new Error("Guion serializado no válido");
+  const code = d.code as Instr[];
+  for (const [i, ins] of code.entries()) {
+    if (!ins || typeof ins !== "object" || !OPS.has(ins.op)) throw new Error(`Instrucción ${i}: operación desconocida`);
+    if (JUMPS.has(ins.op)) {
+      const to = (ins as { to: number }).to;
+      if (!Number.isInteger(to) || to < 0 || to > code.length) throw new Error(`Instrucción ${i}: salto fuera del programa`);
+    }
+  }
+  return code;
 }

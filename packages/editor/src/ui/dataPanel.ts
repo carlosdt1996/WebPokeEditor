@@ -24,14 +24,16 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
     h("select", { onchange: (e: Event) => { on((e.target as HTMLSelectElement).value); onChange(); } },
       ...p.species.map((s) => h("option", { value: s.id, selected: s.id === v }, s.name)));
 
-  const HOLD_NAMES: Record<HoldEffect["kind"], string> = { boost: "Refuerza un tipo", leftovers: "Cura 1/16 por turno", berry: "Baya de curación", cureBerry: "Baya de estado", focus: "Aguante (1 PS)" };
+  const HOLD_NAMES: Record<HoldEffect["kind"], string> = { boost: "Refuerza un tipo", leftovers: "Cura 1/16 por turno", berry: "Baya de curación", cureBerry: "Baya de estado", focus: "Aguante (1 PS)", form: "Transformación (+% y tipo)" };
   /** Editor del efecto de un objeto equipable. */
   const holdCell = (p: Project, it: { hold?: HoldEffect }) => {
     const hd = (it.hold ??= { kind: "leftovers" });
     return h("span", {}, h("select", { onchange: (e: Event) => { hd.kind = (e.target as HTMLSelectElement).value as HoldEffect["kind"]; if (hd.kind === "boost" && hd.type === undefined) hd.type = 0; onChange(); render(); } },
       ...(Object.keys(HOLD_NAMES) as HoldEffect["kind"][]).map((k) => h("option", { value: k, selected: hd.kind === k }, HOLD_NAMES[k]))),
       hd.kind === "boost" ? typeSel(p, hd.type ?? 0, (n) => (hd.type = n)) : "",
-      hd.kind === "boost" || hd.kind === "berry" ? num(hd.amount ?? 20, (n) => (hd.amount = n), 0, 100) : "", hd.kind === "boost" ? "%" : hd.kind === "berry" ? "% PS" : "");
+      hd.kind === "form" ? h("select", { title: "Tipo nuevo", onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v === "") delete hd.type; else hd.type = +v; onChange(); } },
+        h("option", { value: "", selected: hd.type === undefined }, "mismo tipo"), ...p.types.map((t, i) => h("option", { value: i, selected: hd.type === i }, t))) : "",
+      hd.kind === "boost" || hd.kind === "berry" || hd.kind === "form" ? num(hd.amount ?? 20, (n) => (hd.amount = n), 0, 100) : "", hd.kind === "boost" || hd.kind === "form" ? "%" : hd.kind === "berry" ? "% PS" : "");
   };
 
   const spriteCell = (p: Project, s: Species) => {
@@ -165,8 +167,9 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
       h("td", {}, txt(it.name, (v) => (it.name = v))),
       h("td", {}, h("small", { class: "muted" }, it.id)),
       h("td", {}, h("select", { onchange: (e: Event) => { it.kind = (e.target as HTMLSelectElement).value as typeof it.kind; if (it.kind === "held" && !it.hold) it.hold = { kind: "leftovers" }; onChange(); render(); } },
-        h("option", { value: "heal", selected: it.kind === "heal" }, "Cura PS"), h("option", { value: "cure", selected: it.kind === "cure" }, "Cura estado"), h("option", { value: "held", selected: it.kind === "held" }, "Equipable"), h("option", { value: "ball", selected: it.kind === "ball" }, "Captura"))),
-      h("td", { class: "nw" }, it.kind === "held" ? holdCell(p, it) : it.kind === "cure" ? h("small", { class: "muted" }, "—") : num(it.amount, (n) => (it.amount = n), 0, 999), h("small", { class: "muted" }, it.kind === "heal" ? " PS" : it.kind === "ball" ? " % extra" : "")),
+        h("option", { value: "heal", selected: it.kind === "heal" }, "Cura PS"), h("option", { value: "cure", selected: it.kind === "cure" }, "Cura estado"), h("option", { value: "held", selected: it.kind === "held" }, "Equipable"), h("option", { value: "ball", selected: it.kind === "ball" }, "Captura"), h("option", { value: "key", selected: it.kind === "key" }, "Objeto clave"))),
+      h("td", { class: "nw" }, it.kind === "held" ? holdCell(p, it) : it.kind === "cure" || it.kind === "key" ? h("small", { class: "muted" }, "—") : num(it.amount, (n) => (it.amount = n), 0, 999), h("small", { class: "muted" }, it.kind === "heal" ? " PS" : it.kind === "ball" ? " % extra" : "")),
+      h("td", {}, it.kind === "key" ? h("small", { class: "muted" }, "—") : num(it.price ?? 0, (n) => { if (n > 0) it.price = n; else delete it.price; }, 0, 99999)),
       h("td", {}, num(p.inventory[it.id] ?? 0, (n) => (p.inventory[it.id] = n), 0, 99)),
       h("td", {}, h("button", { class: "danger", onclick: () => { p.items = p.items.filter((x) => x !== it); delete p.inventory[it.id]; onChange(); render(); } }, "✕"))));
 
@@ -224,7 +227,7 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
       h("button", { onclick: () => { p.abilities ??= []; p.abilities.push({ id: uniqueId(p.abilities.map((a) => a.id), "habilidad"), name: "Habilidad", kind: "intimidate" }); onChange(); render(); } }, "+ Añadir habilidad"),
       h("h2", {}, "Objetos e inventario inicial"),
       h("div", { class: "scroll" }, h("table", {},
-        h("thead", {}, h("tr", {}, ...["Nombre", "Id", "Efecto", "Cantidad del efecto", "Inventario inicial", ""].map((t) => h("th", {}, t)))),
+        h("thead", {}, h("tr", {}, ...["Nombre", "Id", "Efecto", "Cantidad del efecto", "Precio", "Inventario inicial", ""].map((t) => h("th", {}, t)))),
         h("tbody", {}, ...itemRows))),
       h("button", { onclick: () => { const id = uniqueId(p.items.map((i) => i.id), "objeto"); p.items.push({ id, name: "Objeto", kind: "heal", amount: 30 }); onChange(); render(); } }, "+ Añadir objeto"),
       h("h2", {}, "Encuentros en hierba alta"),

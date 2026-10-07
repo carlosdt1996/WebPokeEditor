@@ -44,7 +44,7 @@ describe("plantilla «Archipiélago de la Marea»", () => {
     expect(validate(p)).toEqual([]);
     expect(parseProject(JSON.stringify(p)).maps).toHaveLength(p.maps.length);
     expect(TEMPLATES.map((t) => t.id)).toContain("archipielago");
-    expect(p.maps.length).toBeGreaterThanOrEqual(20);
+    expect(p.maps).toHaveLength(38);
     expect(p.species.length).toBe(20);
     expect(p.maps.flatMap((m) => m.npcs).filter((n) => n.kind === "trainer").length).toBeGreaterThan(20);
   });
@@ -83,11 +83,11 @@ describe("plantilla «Archipiélago de la Marea»", () => {
       const scripts = [m.onEnter, m.onExit, ...(m.triggers ?? []).map((t) => t.script), ...m.npcs.flatMap((n) => [n.script, n.winScript])];
       for (const s of scripts) if (s) { const r = parseScript(s); if (r.ok) scan(r.code); }
     }
-    for (const f of ["starter", "medalla1", "medalla2", "medalla3", "medalla4", "medalla5", "medalla6", "medalla7", "medalla8", "campeon"]) expect(set.has(f), `ningún guion activa "${f}"`).toBe(true);
+    for (const f of ["starter", "medalla1", "medalla2", "medalla3", "medalla4", "medalla5", "medalla6", "medalla7", "medalla8", "campeon", "rival1", "rival2", "rival3", "rival4", "rival5", "vortice1"]) expect(set.has(f), `ningún guion activa "${f}"`).toBe(true);
     for (const f of needed) expect(set.has(f), `se consulta "${f}" pero nunca se activa`).toBe(true);
   });
 
-  it("los guiones clave funcionan en la VM: elegir inicial, comprar y ganar la medalla", async () => {
+  it("los guiones clave funcionan en la VM: elegir inicial y ganar la medalla", async () => {
     const e = await Engine.load(wasm());
     const log: string[] = [];
     const ctx = (choice: number) => ({
@@ -104,17 +104,6 @@ describe("plantilla «Archipiélago de la Marea»", () => {
     log.length = 0;
     await run(cedro, 0); // segunda vez: ya no vuelve a regalar nada
     expect(log.some((l) => l.startsWith("givemon"))).toBe(false);
-    // tienda: con dinero compra; sin dinero, no
-    const shop = p.maps.find((m) => m.id === "centro-coral")!.npcs.find((n) => n.id === "tendero")!.script!;
-    e.setVar("money", 120);
-    log.length = 0;
-    await run(shop, 0); // Poción (100)
-    expect(log).toContain("give:potion:1");
-    expect(e.getVar("money")).toBe(20);
-    log.length = 0;
-    await run(shop, 1); // Superpoción (300): no alcanza
-    expect(log.some((l) => l.startsWith("give"))).toBe(false);
-    expect(log.some((l) => l.includes("No tienes suficientes monedas"))).toBe(true);
     // medalla
     const fresia = p.maps.find((m) => m.id === "gym-coral")!.npcs.find((n) => n.id === "fresia")!;
     await run(fresia.winScript!);
@@ -128,6 +117,45 @@ describe("plantilla «Archipiélago de la Marea»", () => {
     e.flagsReset();
     await run(gateTrig);
     expect(log.some((l) => l.startsWith("warp:coral"))).toBe(true);
+  });
+
+  it("los objetos clave que consultan los guiones existen y algún guion los entrega", () => {
+    const keys = new Set(p.items.filter((i) => i.kind === "key").map((i) => i.id));
+    const given = new Set<string>(), asked = new Set<string>();
+    for (const m of p.maps) {
+      const scripts = [m.onEnter, m.onExit, ...(m.triggers ?? []).map((t) => t.script), ...m.npcs.flatMap((n) => [n.script, n.winScript])];
+      for (const s of scripts) if (s) {
+        const r = parseScript(s);
+        if (!r.ok) continue;
+        for (const i of r.code) { if (i.op === "give") given.add(i.item); if (i.op === "jcmp" && i.name.startsWith("item_")) asked.add(i.name.slice(5)); }
+      }
+    }
+    for (const id of asked) expect(p.items.some((i) => i.id === id), `objeto "${id}" consultado y no definido`).toBe(true);
+    for (const id of keys) expect(given.has(id), `objeto clave "${id}" nunca se entrega`).toBe(true);
+  });
+
+  it("la pesca da resultados variados y la forja sellada manda de vuelta sin la llave", async () => {
+    const e = await Engine.load(wasm());
+    e.reset(8, 8, 77);
+    e.flagsReset();
+    const log: string[] = [];
+    const ctx = { choose: async () => 0, equip: () => {}, say: async (l: string[]) => { log.push("say:" + l.join("|")); }, give: () => {}, heal: () => {},
+      battle: async (s: string, l: number) => { log.push(`battle:${s}:${l}`); }, givemon: () => {}, warp: async (m: string) => { log.push("warp:" + m); } };
+    const run = async (src: string) => { const r = parseScript(src); if (!r.ok) throw new Error(r.errors.join()); await runScript(r.code, ctx, e); };
+    const fish = p.maps.find((m) => m.id === "faro")!.npcs.find((n) => n.id === "pescador-faro")!.script!;
+    for (let i = 0; i < 40; i++) await run(fish);
+    expect(log.some((l) => l.includes("no pica nada"))).toBe(true);
+    const species = new Set(log.filter((l) => l.startsWith("battle:")).map((l) => l.split(":")[1]));
+    expect(species.size).toBeGreaterThanOrEqual(2);
+    log.length = 0;
+    const forge = p.maps.find((m) => m.id === "ceniza")!.triggers!.find((t) => t.name === "Forja sellada")!.script;
+    e.setVar("item_llave-forja", 0);
+    await run(forge);
+    expect(log.some((l) => l.startsWith("warp:ceniza"))).toBe(true);
+    log.length = 0;
+    e.setVar("item_llave-forja", 1);
+    await run(forge);
+    expect(log).toEqual([]);
   });
 
   it("los equipos de los líderes crecen de nivel con la historia", () => {

@@ -159,7 +159,7 @@ async function main() {
       inspector.append(
         h("h3", {}, "NPC"),
         field("Nombre", h("input", { type: "text", value: n.name, oninput: (e: Event) => { n.name = (e.target as HTMLInputElement).value; persist(); } })),
-        field("Tipo", sel(n.kind, [["talk", "Conversación"], ["trainer", "Entrenador"], ["healer", "Curandero"], ["script", "Script"]], (v) => { n.kind = v as Npc["kind"]; if (n.kind === "trainer" && !n.team?.length) n.team = [{ species: project.species[0]?.id ?? "", level: 5 }]; })),
+        field("Tipo", sel(n.kind, [["talk", "Conversación"], ["trainer", "Entrenador"], ["healer", "Curandero"], ["script", "Script"], ["shop", "Tienda"]], (v) => { n.kind = v as Npc["kind"]; if (n.kind === "trainer" && !n.team?.length) n.team = [{ species: project.species[0]?.id ?? "", level: 5 }]; })),
         ...(n.kind === "trainer" ? [h("label", { class: "check" }, h("input", { type: "checkbox", checked: !!n.double, onchange: (e: Event) => { n.double = (e.target as HTMLInputElement).checked; persist(); } }), "Combate doble (2 contra 2)")] : []),
         field("Aspecto", sel(n.look, [[0, "Morado"], [1, "Verde"], [2, "Gris"], [3, "Naranja"]], (v) => (n.look = +v))),
         field("Mira hacia", sel(n.dir, [[0, "Abajo"], [1, "Arriba"], [2, "Izquierda"], [3, "Derecha"]], (v) => (n.dir = +v))),
@@ -167,6 +167,13 @@ async function main() {
         ...(n.kind === "script" ? [] : [field("Diálogo (una línea por mensaje)", lines(n.lines, (a) => (n.lines = a)))]),
       );
       if (n.kind === "script") inspector.append(...scriptEditor(() => n.script ?? "", (v) => (n.script = v)));
+      if (n.kind === "shop") {
+        const stock = n.stock ??= [];
+        inspector.append(h("h3", {}, "Objetos en venta (precio en la pestaña Datos)"),
+          ...project.items.filter((it) => it.kind !== "key").map((it) => h("label", { class: "check" },
+            h("input", { type: "checkbox", checked: stock.includes(it.id), onchange: (e: Event) => { const on = (e.target as HTMLInputElement).checked; n.stock = on ? [...stock, it.id] : stock.filter((x) => x !== it.id); persist(); } }),
+            `${it.name} (${it.price ?? "sin precio"})`)));
+      }
       if (n.kind === "trainer") {
         const team = n.team ?? (n.team = []);
         inspector.append(h("h3", {}, "Equipo del entrenador"),

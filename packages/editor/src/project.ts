@@ -1,7 +1,7 @@
 /** Modelo de datos del proyecto (ver docs/architecture/data-model.md). Todo es dato serializable. */
 import { parseScript } from "./script";
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 /** Límites de las tablas del motor de combate (crates/engine-core/src/battle.rs). */
 export const LIMITS = { types: 16, moves: 256, species: 128, learn: 8, abilities: 64, helds: 64 } as const;
 
@@ -88,7 +88,7 @@ export interface Species {
 }
 export interface Move { id: string; name: string; type: number; category: "physical" | "special"; power: number; accuracy: number; effect?: MoveEffect }
 
-export type NpcKind = "talk" | "trainer" | "healer" | "script";
+export type NpcKind = "talk" | "trainer" | "healer" | "script" | "shop";
 export interface TeamMember { species: string; level: number; /** objeto equipado (id de un objeto de tipo "held") */ held?: string }
 export interface Npc {
   id: string; x: number; y: number; look: number; dir: number; kind: NpcKind; name: string;
@@ -98,14 +98,17 @@ export interface Npc {
   defeatedLines?: string[];
   /** Solo entrenadores: combate 2 contra 2 (necesita 2+ criaturas en cada equipo). */
   double?: boolean;
+  /** Solo kind "shop": ids de objeto que vende (con su `price`). También compra los objetos del jugador a mitad de precio. */
+  stock?: string[];
   /** Solo kind "script": ver script.ts. */
   script?: string;
   /** Solo entrenadores: script que se ejecuta al ganarles (p. ej. dar una medalla). */
   winScript?: string;
 }
-/** Efecto de un objeto equipable: refuerzo de tipo (+amount %), restos (1/16 por turno), baya de curación (amount % al bajar a la mitad), baya de estado y banda (sobrevive con 1 PS). */
-export interface HoldEffect { kind: "boost" | "leftovers" | "berry" | "cureBerry" | "focus"; type?: number; amount?: number }
-export interface ItemDef { id: string; name: string; kind: "heal" | "ball" | "cure" | "held"; hold?: HoldEffect; /** heal: PS que cura. ball: bonus (+%) a la probabilidad de captura. cure: quita el estado alterado. */ amount: number }
+/** Efecto de un objeto equipable: refuerzo de tipo (+amount %), restos (1/16 por turno), baya de curación (amount % al bajar a la mitad), baya de estado, banda (sobrevive con 1 PS) y transformación (una vez por combate: +amount % a Ata/Def/AtE/DeE/Vel y, si hay `type`, cambia el primer tipo). */
+export interface HoldEffect { kind: "boost" | "leftovers" | "berry" | "cureBerry" | "focus" | "form"; type?: number; amount?: number }
+/** `key`: objeto clave (no se vende ni se usa en combate). `price`: precio de compra en tiendas (se vende a la mitad). */
+export interface ItemDef { id: string; name: string; kind: "heal" | "ball" | "cure" | "held" | "key"; price?: number; hold?: HoldEffect; /** heal: PS que cura. ball: bonus (+%) a la probabilidad de captura. cure: quita el estado alterado. */ amount: number }
 /** Disparador por casilla: ejecuta un script al pisarla. */
 export interface Trigger { x: number; y: number; name: string; script: string; once: boolean }
 export interface Warp { x: number; y: number; toMap: string; toX: number; toY: number }
@@ -139,6 +142,8 @@ export interface Project {
   abilities: AbilityDef[];
   weatherRules: WeatherRules;
   items: ItemDef[];
+  /** Dinero inicial del jugador (monedas). */
+  money: number;
   inventory: Record<string, number>;
   /** Nombres de tipo; el índice es el id de tipo. */
   types: string[];
@@ -240,16 +245,17 @@ export function defaultProject(): Project {
       { id: "sequia", name: "Sequía", kind: "weather", weather: "sun", description: "Al entrar, el sol brilla durante 5 turnos." },
     ],
     items: [
-      { id: "potion", name: "Poción", kind: "heal", amount: 20 },
-      { id: "superpotion", name: "Superpoción", kind: "heal", amount: 60 },
-      { id: "antidoto", name: "Cura Total", kind: "cure", amount: 0 },
+      { id: "potion", name: "Poción", kind: "heal", amount: 20, price: 100 },
+      { id: "superpotion", name: "Superpoción", kind: "heal", amount: 60, price: 300 },
+      { id: "antidoto", name: "Cura Total", kind: "cure", amount: 0, price: 80 },
       { id: "restos", name: "Restos", kind: "held", amount: 0, hold: { kind: "leftovers" } },
       { id: "baya-oran", name: "Baya Oran", kind: "held", amount: 0, hold: { kind: "berry", amount: 30 } },
       { id: "carbon", name: "Carbón", kind: "held", amount: 0, hold: { kind: "boost", type: 1, amount: 20 } },
       { id: "banda", name: "Banda Aguante", kind: "held", amount: 0, hold: { kind: "focus" } },
-      { id: "ball", name: "Bola", kind: "ball", amount: 0 },
-      { id: "superball", name: "Superbola", kind: "ball", amount: 20 },
+      { id: "ball", name: "Bola", kind: "ball", amount: 0, price: 150 },
+      { id: "superball", name: "Superbola", kind: "ball", amount: 20, price: 400 },
     ],
+    money: 500,
     inventory: { ball: 8, potion: 4, superpotion: 1, antidoto: 2, restos: 1, carbon: 1 },
     maps: [
       mapOf("pueblo", "Pueblo Inicial", town, {
@@ -355,6 +361,13 @@ export function migrate(input: unknown): Project {
     p.weatherRules = defaultWeatherRules(p.types ?? []);
     p.schemaVersion = 5;
   }
+  if (p.schemaVersion === 5) {
+    // dinero propio del motor y precios de tienda; los objetos de ejemplo reciben precio
+    p.money = typeof p.money === "number" ? p.money : 0;
+    const prices: Record<string, number> = { potion: 100, superpotion: 300, antidoto: 80, ball: 150, superball: 400 };
+    for (const it of p.items ?? []) if (it.price === undefined && prices[it.id] !== undefined) it.price = prices[it.id];
+    p.schemaVersion = 6;
+  }
   return p as Project;
 }
 
@@ -367,6 +380,15 @@ export function validate(p: Project): string[] {
   const mapIds = new Set(p.maps.map((m) => m.id));
   const itemIds = new Set(p.items.map((i) => i.id));
   if (itemIds.size !== p.items.length) errs.push("Ids de objeto duplicados");
+  if (!(p.money >= 0)) errs.push("El dinero inicial debe ser un número ≥ 0");
+  for (const m of p.maps) for (const n of m.npcs) if (n.kind === "shop") {
+    if (!n.stock?.length) errs.push(`${m.name}/${n.name}: la tienda no tiene objetos`);
+    for (const id of n.stock ?? []) {
+      const it = p.items.find((i) => i.id === id);
+      if (!it) errs.push(`${m.name}/${n.name}: vende un objeto inexistente "${id}"`);
+      else if (!(it.price! > 0)) errs.push(`${m.name}/${n.name}: "${it.name}" no tiene precio`);
+    }
+  }
   for (const k of Object.keys(p.inventory)) if (!itemIds.has(k)) errs.push(`Inventario: objeto inexistente "${k}"`);
   if (!p.maps.length) errs.push("El proyecto no tiene mapas");
   if (p.species.length > LIMITS.species) errs.push(`Demasiadas especies (máximo ${LIMITS.species})`);
@@ -458,7 +480,7 @@ export function validate(p: Project): string[] {
 export function parseProject(json: string, strict = true): Project {
   const p = migrate(JSON.parse(json));
   if (!Array.isArray(p.maps) || !p.maps.length || !Array.isArray(p.species) || !Array.isArray(p.moves)) throw new Error("Proyecto inválido: faltan mapas, especies o movimientos");
-  p.items ??= []; p.abilities ??= []; p.inventory ??= {}; p.party ??= [];
+  p.items ??= []; p.money ??= 0; p.abilities ??= []; p.inventory ??= {}; p.party ??= [];
   if (strict) {
     const errs = validate(p);
     if (errs.length) throw new Error("Proyecto inválido:\n- " + errs.join("\n- "));

@@ -9,7 +9,7 @@ import { BATTLE_STATS, BATTLE_STAT_NAMES, LIMITS, type Move, type Project, STATU
 export interface Mon { species: string; level: number; hp: number; exp: number; moves: string[]; /** objeto equipado (id); se consume si es de un solo uso */ held?: string; /** 0 = sano; 1…5 = índice+1 en STATUS_KINDS (persiste entre combates). */ status?: number }
 
 export type Action =
-  | { kind: "move"; index: number; /** slot rival (0/1); por defecto el primero en pie */ target?: number }
+  | { kind: "move"; index: number; /** slot rival (0/1); por defecto el primero en pie */ target?: number; /** transformarse antes de actuar (si lleva un objeto de transformación y no se ha usado) */ form?: boolean }
   | { kind: "switch"; to: number }
   | { kind: "item"; id: string }
   | { kind: "run" };
@@ -43,13 +43,15 @@ export const healAll = (p: Project, party: Mon[]) => party.forEach((m) => { m.hp
 
 // Códigos del protocolo con Rust (deben coincidir con battle.rs)
 const A = { move: 1, switch: 2, heal: 3, ball: 4, run: 5, noitem: 6, cure: 7 };
-const E = { use: 1, miss: 2, hit: 3, faint: 4, exp: 5, level: 6, learn: 7, evolve: 8, sendout: 9, out: 10, in: 11, heal: 12, noitem: 13, throw: 14, catch: 15, ballFail: 16, runOk: 17, runFail: 18, noRun: 19, noCatch: 20, forceIn: 21, status: 22, stage: 23, cant: 24, wake: 25, thaw: 26, chip: 27, drain: 28, recoil: 29, selfHeal: 30, ability: 31, immune: 32, absorb: 33, cure: 34, noEffect: 35, charge: 36, recharge: 37, multi: 38, weather: 39, weatherEnd: 40, weatherChip: 41, terrain: 42, terrainEnd: 43, held: 44, protect: 45, protected: 46, flinch: 47, trap: 48, trapChip: 49, trapEnd: 50, trapped: 51, phaze: 52 };
+const E = { use: 1, miss: 2, hit: 3, faint: 4, exp: 5, level: 6, learn: 7, evolve: 8, sendout: 9, out: 10, in: 11, heal: 12, noitem: 13, throw: 14, catch: 15, ballFail: 16, runOk: 17, runFail: 18, noRun: 19, noCatch: 20, forceIn: 21, status: 22, stage: 23, cant: 24, wake: 25, thaw: 26, chip: 27, drain: 28, recoil: 29, selfHeal: 30, ability: 31, immune: 32, absorb: 33, cure: 34, noEffect: 35, charge: 36, recharge: 37, multi: 38, weather: 39, weatherEnd: 40, weatherChip: 41, terrain: 42, terrainEnd: 43, held: 44, protect: 45, protected: 46, flinch: 47, trap: 48, trapChip: 49, trapEnd: 50, trapped: 51, phaze: 52, form: 53 };
 const EV_STRIDE = 17;
 const RESULTS: (BattleResult | null)[] = [null, "win", "lose", "run", "caught"];
 const MON_STRIDE = 11;
 
 export class Battle {
   result: BattleResult | null = null;
+  /** El jugador ya se ha transformado en este combate. */
+  formUsed = false;
   /** Índices (en party / foes) de las criaturas en combate; -1 = pendiente de reemplazo, -2 = vacía. */
   pa: number[] = [];
   fa: number[] = [];
@@ -120,8 +122,8 @@ export class Battle {
     }
     const KIND: Record<string, number> = { immune: 1, absorb: 2, statusImmune: 3, intimidate: 4, pinch: 5, speedBoost: 6, weather: 7 };
     for (const a of abilities) put(KIND[a.kind] ?? 0, a.kind === "statusImmune" ? STATUS_KINDS.indexOf(a.status ?? "burn") + 1 : a.kind === "weather" ? WEATHER_KINDS.indexOf(a.weather ?? "sun") + 1 : (a.type ?? 0), a.amount ?? 0);
-    const HELD: Record<string, number> = { boost: 1, leftovers: 2, berry: 3, cureBerry: 4, focus: 5 };
-    for (const it of helds) put(HELD[it.hold?.kind ?? ""] ?? 0, it.hold?.type ?? 0, it.hold?.amount ?? 0);
+    const HELD: Record<string, number> = { boost: 1, leftovers: 2, berry: 3, cureBerry: 4, focus: 5, form: 6 };
+    for (const it of helds) put(HELD[it.hold?.kind ?? ""] ?? 0, it.hold?.kind === "form" ? (it.hold.type ?? -1) : (it.hold?.type ?? 0), it.hold?.amount ?? 0);
     for (const s of p.species) {
       const st = s.stats;
       put(s.types[0] ?? 0, s.types[1] ?? -1, st.hp, st.atk, st.def, st.spa, st.spd, st.spe);
@@ -174,7 +176,7 @@ export class Battle {
     this.pa.forEach((pi, slot) => {
       const a = acts[slot];
       if (pi < 0 || !a) return;
-      if (a.kind === "move") this.e.btSetAction(slot, A.move, a.index, a.target ?? 0);
+      if (a.kind === "move") this.e.btSetAction(slot, A.move | (a.form && this.canForm(slot) ? 0x100 : 0), a.index, a.target ?? 0);
       else if (a.kind === "switch") this.e.btSetAction(slot, A.switch, a.to, 0);
       else if (a.kind === "run") this.e.btSetAction(slot, A.run, 0, 0);
       else {
@@ -186,6 +188,12 @@ export class Battle {
       }
     });
     return this.collect(this.e.btTurn());
+  }
+
+  /** ¿Puede el jugador transformar a la criatura de esta casilla ahora mismo? */
+  canForm(slot: number): boolean {
+    const m = this.party[this.pa[slot]];
+    return !this.formUsed && !!m && m.hp > 0 && this.heldList.find((h) => h.id === m.held)?.kind === "form";
   }
 
   /** Reemplazo obligatorio de una casilla (tras debilitarse). */
@@ -295,6 +303,11 @@ export class Battle {
         case E.noEffect: push("No tendría ningún efecto."); break;
         case E.charge: push(`¡${cap(slotName(a, b))} acumula energía!`); break;
         case E.recharge: push(`¡${cap(slotName(a, b))} debe recuperarse!`); break;
+        case E.form: {
+          if (a === 0) this.formUsed = true;
+          push(`¡${cap(slotName(a, b))} se transforma${d >= 0 ? ` y adquiere el tipo ${this.p.types[d] ?? "?"}` : ""}!`, "levelup");
+          break;
+        }
         case E.protect: push(`¡${cap(slotName(a, b))} se protege!`); break;
         case E.protected: push(`¡${cap(slotName(a, b))} se ha protegido del ataque!`, "weak"); break;
         case E.flinch: push(`¡${cap(slotName(a, b))} se amedrenta y no puede moverse!`); break;

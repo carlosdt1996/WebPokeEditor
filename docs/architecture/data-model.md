@@ -18,7 +18,7 @@ Por `id`, nunca por índice, para permitir reordenar y mods. El *validator* en `
 ## Migraciones
 Cada cambio de esquema incrementa `schemaVersion` e incluye migración + test.
 
-## Estado actual (schemaVersion 5)
-`Project`: `maps[]`, `start`, `party[]`, `items[]` (curar PS, curar estado, capturar o equipable con su `hold`) + `inventory` (por id), `types`/`typeChart`, `abilities[]`, `weatherRules`, `species[]` (con `sprite?`, `evolve?`, `learnset?`, `ability?`), `moves[]` (con `effect?`) y `atlas?`.
-`GameMap`: `tiles` (suelo), `objects?` (capa superior, 0 = vacío; ids ≥ 12), `heights?` (Int8+128, unidades de 0,25 tiles), `npcs[]` (con `kind: talk|trainer|healer|script`, `double?`, `script?`, `winScript?`), `warps[]`, `triggers[]` (script por casilla), `onEnter?` / `onExit?` (scripts al entrar y al salir del mapa), `weather?` (clima permanente en combate), `encounters[]`, `encounterLevel`.
-Migraciones en `migrate()` (v1→v2→v3→v4→v5) con tests.
+## Estado actual (schemaVersion 6)
+`Project`: `maps[]`, `start`, `party[]`, `money` (monedas iniciales; los guiones lo ven como la variable `money`), `items[]` (curar PS, curar estado, capturar, equipable con su `hold` u **objeto clave**; con `price?` de compra, venta a la mitad) + `inventory` (por id; los guiones ven `item_<id>`), `types`/`typeChart`, `abilities[]`, `weatherRules`, `species[]` (con `sprite?`, `evolve?`, `learnset?`, `ability?`), `moves[]` (con `effect?`) y `atlas?`.
+`GameMap`: `tiles` (suelo), `objects?` (capa superior, 0 = vacío; ids ≥ 12), `heights?` (Int8+128, unidades de 0,25 tiles), `npcs[]` (con `kind: talk|trainer|healer|script|shop` (`stock?` en tiendas), `double?`, `script?`, `winScript?`), `warps[]`, `triggers[]` (script por casilla), `onEnter?` / `onExit?` (scripts al entrar y al salir del mapa), `weather?` (clima permanente en combate), `encounters[]`, `encounterLevel`.
+Migraciones en `migrate()` (v1→v2→v3→v4→v5→v6) con tests.

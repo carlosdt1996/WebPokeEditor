@@ -44,6 +44,7 @@ pub const H_BOOST: i32 = 1; // a = tipo, b = % extra de potencia
 pub const H_LEFTOVERS: i32 = 2; // cura 1/16 de los PS cada turno
 pub const H_BERRY: i32 = 3; // b = % de PS máx. que cura al bajar a la mitad (se consume)
 pub const H_CURE_BERRY: i32 = 4; // cura el estado al recibirlo (se consume)
+pub const H_FORM: i32 = 6; // transformación (una vez por combate): a = tipo nuevo (-1 = igual), b = % extra a Ata/Def/AtE/DeE/Vel
 pub const H_FOCUS: i32 = 5; // sobrevive con 1 PS a un golpe desde PS máximos (se consume)
 
 // Resultado
@@ -60,6 +61,8 @@ pub const A_SWITCH: i32 = 2; // a = criatura del equipo
 pub const A_HEAL: i32 = 3; // a = PS, b = id de objeto
 pub const A_BALL: i32 = 4; // a = bonus %, b = id de objeto
 pub const A_RUN: i32 = 5;
+/// Bit que se suma a la acción de movimiento para transformarse antes de actuar.
+pub const A_FORM_FLAG: i32 = 0x100;
 pub const A_NOITEM: i32 = 6;
 pub const A_CURE: i32 = 7; // a = objeto
 
@@ -115,6 +118,7 @@ pub const E_TRAP_CHIP: i32 = 49; // a=lado, b=casilla, c=daño
 pub const E_TRAP_END: i32 = 50; // a=lado, b=casilla
 pub const E_TRAPPED: i32 = 51; // a=lado, b=casilla: no puede huir/cambiar
 pub const E_PHAZE: i32 = 52; // a=lado, b=casilla, c=nueva criatura (-1: el combate termina)
+pub const E_FORM: i32 = 53; // a=lado, b=casilla, c=criatura, d=tipo nuevo (-1 = igual)
 pub const E_HELD: i32 = 44; // a=lado, b=casilla, c=objeto equipado, d=cantidad | consumido<<16
 
 #[derive(Clone, Copy)]
@@ -156,6 +160,9 @@ pub struct Battle {
     /// Movimiento en carga (índice+1) y casilla objetivo; y criaturas que deben recargar.
     charging: [[(i32, i32); 6]; 2],
     recharging: [[bool; 6]; 2],
+    /// Criaturas transformadas y si cada lado ya usó su transformación en este combate.
+    formed: [[bool; 6]; 2],
+    form_used: [bool; 2],
     /// Protección (este turno / el anterior), retroceso y atrapamiento (turnos restantes).
     prot: [[bool; 6]; 2],
     prot_prev: [[bool; 6]; 2],
@@ -195,6 +202,8 @@ impl Battle {
             sleep: [[0; 6]; 2],
             charging: [[(0, 0); 6]; 2],
             recharging: [[false; 6]; 2],
+            formed: [[false; 6]; 2],
+            form_used: [false; 2],
             prot: [[false; 6]; 2],
             prot_prev: [[false; 6]; 2],
             flinched: [[false; 6]; 2],
@@ -272,6 +281,8 @@ impl Battle {
         self.sleep = [[0; 6]; 2];
         self.charging = [[(0, 0); 6]; 2];
         self.recharging = [[false; 6]; 2];
+        self.formed = [[false; 6]; 2];
+        self.form_used = [false; 2];
         self.prot = [[false; 6]; 2];
         self.prot_prev = [[false; 6]; 2];
         self.flinched = [[false; 6]; 2];
@@ -303,11 +314,19 @@ impl Battle {
     /// Estadística efectiva en combate (k: 1 ataque … 5 velocidad): base × modificador de etapa; la parálisis reduce la velocidad a la mitad.
     fn eff_stat(&self, side: usize, idx: usize, k: usize) -> i32 {
         let m = &self.team[side][idx];
-        let base = self.stat(m, k);
+        let mut base = self.stat(m, k);
+        if k >= 1 && self.formed[side][idx] { if let Some(h) = self.held(side, idx) { if h.kind == H_FORM { base = base * (100 + h.b) / 100; } } }
         let st = self.stages[side][idx][k - 1];
         let mut v = if st >= 0 { base * (2 + st) / 2 } else { base * 2 / (2 - st) };
         if k == 5 && m.status == ST_PARA { v /= 2; }
         v.max(1)
+    }
+
+    /// Tipos efectivos de una criatura (la transformación puede cambiar el primero).
+    fn types_of(&self, side: usize, idx: usize) -> [i32; 2] {
+        let mut t = self.species[self.team[side][idx].species as usize].t;
+        if self.formed[side][idx] { if let Some(h) = self.held(side, idx) { if h.kind == H_FORM && h.a >= 0 { t[0] = h.a; } } }
+        t
     }
 
     fn ability(&self, side: usize, idx: usize) -> (i32, AbilityD) {
@@ -469,8 +488,8 @@ impl Battle {
                 // clima dañino (tormenta de arena, granizo) salvo tipos inmunes
                 let w = self.weather.0;
                 if (1..5).contains(&w) && self.wrules[w as usize].chip != 0 {
-                    let (r, sp) = (self.wrules[w as usize], self.species[m.species as usize]);
-                    let immune = (0..r.n_imm).any(|k| sp.t.contains(&r.imm[k]));
+                    let (r, tt) = (self.wrules[w as usize], self.types_of(side, iu));
+                    let immune = (0..r.n_imm).any(|k| tt.contains(&r.imm[k]));
                     if !immune {
                         let d = (self.max_hp(&m) / 16).max(1);
                         self.team[side][iu].hp = (self.team[side][iu].hp - d).max(0);
@@ -514,6 +533,12 @@ impl Battle {
         self.n_events = 0;
         if self.result != R_NONE || self.awaiting_switch() { return 0; }
         let mut units: Vec<(Unit, u32)> = Vec::new();
+        let mut acts = acts;
+        // transformación: antes de que nadie actúe (el jugador la pide con A_FORM_FLAG; el rival entrenador la usa en el primer turno)
+        for k in 0..2 {
+            if acts[k][0] & A_FORM_FLAG != 0 { acts[k][0] &= !A_FORM_FLAG; self.try_form(0, k); }
+        }
+        if self.trainer { for k in 0..2 { self.try_form(1, k); } }
         for k in 0..2 {
             let pi = self.active[0][k];
             if pi >= 0 && acts[k][0] != A_NONE { units.push((Unit { side: 0, slot: k, kind: acts[k][0], a: acts[k][1], b: acts[k][2], mon: pi as usize }, 0)); }
@@ -562,6 +587,21 @@ impl Battle {
         }
         if self.result == R_NONE { self.end_of_turn(); }
         self.n_events
+    }
+
+    /// Transforma a la criatura de la casilla si lleva el objeto adecuado y su lado no se ha transformado aún.
+    fn try_form(&mut self, side: usize, slot: usize) {
+        let i = self.active[side][slot];
+        if i < 0 || self.form_used[side] || self.team[side][i as usize].hp <= 0 { return; }
+        let iu = i as usize;
+        match self.held(side, iu) {
+            Some(h) if h.kind == H_FORM => {
+                self.form_used[side] = true;
+                self.formed[side][iu] = true;
+                self.ev(E_FORM, side as i32, slot as i32, i, h.a);
+            }
+            _ => {}
+        }
     }
 
     fn player_act(&mut self, u: Unit) {
@@ -673,11 +713,10 @@ impl Battle {
             self.ev(E_ABSORB, other as i32, ts as i32, heal, dai);
             return;
         }
-        let (asp, dsp) = (self.species[a.species as usize], self.species[d.species as usize]);
         let phys = mv.cat == 0;
         let mut eff = 100;
-        for &t in dsp.t.iter().filter(|&&t| t >= 0) { eff = eff * self.chart[(mv.ty as usize).min(MAX_TYPES - 1)][(t as usize).min(MAX_TYPES - 1)] / 100; }
-        let stab = if asp.t.contains(&mv.ty) { 150 } else { 100 };
+        for &t in self.types_of(other, di).iter().filter(|&&t| t >= 0) { eff = eff * self.chart[(mv.ty as usize).min(MAX_TYPES - 1)][(t as usize).min(MAX_TYPES - 1)] / 100; }
+        let stab = if self.types_of(side, ai).contains(&mv.ty) { 150 } else { 100 };
         let (_, aab) = self.ability(side, ai);
         let mut ctx = if aab.kind == AB_PINCH && aab.a == mv.ty && a.hp * 3 <= self.max_hp(&a) { 150 } else { 100 };
         // clima, terreno y objeto equipado
@@ -1001,7 +1040,7 @@ mod tests {
     /// Movimientos: 0 placaje, 1 ascua (quema), 2 espora (sueño), 3 danza (+2 ataque), 4 rápido (prio +1), 5 drenaje, 6 retroceso, 7 recuperación.
     fn load_fx(b: &mut Battle) {
         // 15 movimientos, 4 habilidades, 5 objetos equipables, 4 especies
-        let mut v: Vec<i32> = vec![2, 19, 4, 4, 5];
+        let mut v: Vec<i32> = vec![2, 19, 4, 4, 6];
         v.extend([100, 200, 100, 100]);
         // clima: [impulsa, debilita, daño, n_inmunes, inm×4]
         v.extend([1, 0, 0, 0, -1, -1, -1, -1]); // 1 sol: potencia el tipo 1, debilita el 0
@@ -1040,7 +1079,7 @@ mod tests {
         ];
         for (m, e) in ext2 { v.extend(m); v.extend(none); v.extend(e); }
         v.extend([AB_INTIMIDATE, 0, 0, AB_ABSORB, 1, 25, AB_SPEED_BOOST, 0, 0, AB_WEATHER, 2, 0]); // habilidades 0–3
-        v.extend([H_BOOST, 0, 50, H_LEFTOVERS, 0, 0, H_BERRY, 0, 50, H_CURE_BERRY, 0, 0, H_FOCUS, 0, 0]); // objetos 0–4
+        v.extend([H_BOOST, 0, 50, H_LEFTOVERS, 0, 0, H_BERRY, 0, 50, H_CURE_BERRY, 0, 0, H_FOCUS, 0, 0, H_FORM, 1, 50]); // objetos 0–5
         let mut sp = |t: [i32; 2], st: [i32; 6], ab: i32| {
             v.extend(t); v.extend(st); v.extend([0, -1, 0]);
             for _ in 0..8 { v.extend([0, 0]); }
@@ -1233,6 +1272,30 @@ mod tests {
         let n = b.turn([[A_MOVE, 0, 0], [A_NONE, 0, 0]]);
         assert_eq!(count(&b, n, E_PHAZE), 1);
         assert_eq!(b.result, R_RUN);
+    }
+
+    #[test]
+    fn form_boosts_stats_once_and_changes_type() {
+        let dmg = |form: bool, seed: u32| {
+            let mut b = fx_battle(seed, (0, 40), (0, 30), [1, 0]); // ataque especial de tipo 1: con el cambio de tipo gana STAB
+            b.team[0][0].held = 5;
+            b.start(true, false, 0);
+            b.team[1][0].hp = 9999;
+            let a = if form { A_MOVE | A_FORM_FLAG } else { A_MOVE };
+            let n = b.turn([[a, 0, 0], [A_NONE, 0, 0]]);
+            let hit = (0..n).find(|&i| b.events[i * EV_STRIDE] == E_HIT && b.events[i * EV_STRIDE + 1] == 1).map(|i| b.events[i * EV_STRIDE + 3]).unwrap();
+            (hit, count(&b, n, E_FORM), b)
+        };
+        let (plain, f0, _) = dmg(false, 71);
+        let (boosted, f1, b) = dmg(true, 71);
+        assert_eq!(f0, 0);
+        assert_eq!(f1, 1);
+        assert!(boosted > plain, "{boosted} > {plain}");
+        assert_eq!(b.types_of(0, 0)[0], 1, "el primer tipo cambia al del objeto");
+        // solo una vez por combate
+        let mut b = b;
+        let n = b.turn([[A_MOVE | A_FORM_FLAG, 0, 0], [A_NONE, 0, 0]]);
+        assert_eq!(count(&b, n, E_FORM), 0);
     }
 
     #[test]

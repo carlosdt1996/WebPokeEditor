@@ -96,9 +96,11 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
           if (t === null) continue;
           target = t;
         }
-        return { kind: "move", index: a, target };
+        let form = false;
+        if (b.canForm(slot)) form = (await choose<boolean>("¿Transformarte este turno?", [{ label: "✨ Sí", value: true }, { label: "No", value: false }], false)) ?? false;
+        return { kind: "move", index: a, target, form };
       } else if (top === "bag") {
-        const a = await choose<string>("Mochila", p.items.map((it) => ({
+        const a = await choose<string>("Mochila", p.items.filter((it) => it.kind !== "key").map((it) => ({
           label: `${it.name} ×${b.opts.inv[it.id] ?? 0}`, value: it.id,
           disabled: (b.opts.inv[it.id] ?? 0) <= 0 || (it.kind === "ball" && (b.isTrainer || b.size > 1)),
         })), true);

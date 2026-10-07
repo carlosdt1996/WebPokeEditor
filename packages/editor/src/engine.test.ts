@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Engine, Ev, Input } from "./engine";
 import { Battle, healAll, makeMon, monMaxHp } from "./battle";
 import { movesFromCsv, movesToCsv, parseCsv, speciesFromCsv, speciesToCsv, toCsv } from "./csv";
-import { parseScript, runScript } from "./script";
+import { deserializeScript, parseScript, runScript, serializeScript } from "./script";
 import { decodeTiles, defaultProject, effectiveness, encodeTiles, migrate, parseProject, validate } from "./project";
 import { archipelagoProject } from "./templates";
 
@@ -68,7 +68,7 @@ describe("migración de esquema", () => {
     delete v2.items;
     delete v2.abilities;
     const p = migrate(v2);
-    expect(p.schemaVersion).toBe(5);
+    expect(p.schemaVersion).toBe(6);
     expect(p.inventory).toEqual({ ball: 7, potion: 2 });
     expect(p.items.length).toBe(2);
     expect(validate(p)).toEqual([]);
@@ -83,7 +83,7 @@ describe("migración de esquema", () => {
       encounters: ["a"],
     };
     const p = migrate(v1);
-    expect(p.schemaVersion).toBe(5);
+    expect(p.schemaVersion).toBe(6);
     expect(p.abilities).toEqual([]);
     expect(p.items.map((i) => i.id)).toEqual(["potion", "ball"]);
     expect(p.maps).toHaveLength(1);
@@ -278,6 +278,57 @@ describe("scripts: variables, bucles y disparadores", () => {
   it("operaciones con texto: upper, lower, strlen, streq y contains", async () => {
     const r = await run("setstr n Pikachu\nupper n\nsay {n}\nlower n\nstrlen n len\nstreq n pikachu eq\ncontains n chu c1\ncontains n xyz c2\nsay {len} {eq} {c1} {c2}");
     expect(r.log).toEqual(["say:PIKACHU|7 1 1 0"]);
+  });
+  it("listas numéricas: nlist, npush, nget, nset, nsum, nmax, nsort y nlen", async () => {
+    const r = await run("nlist n 5 | 1 | 9\nnpush n 4\nset i 1\nnset n 0 7\nnsum n s\nnmax n m\nnlen n l\nnsort n\nnget n i g\nnget n 3 h\nnpop n\nnlen n l2\nsay {s} {m} {l} {g} {h} {l2}");
+    expect(r.log).toEqual(["say:21 9 4 4 9 3"]);
+  });
+  it("diccionarios: dict, dset, dget, dhas, ddel y dlen (con interpolación)", async () => {
+    const r = await run("setstr k fuego\ndict tipos fuego=Rojo | agua=Azul\ndset tipos planta Verde\ndget tipos {k} a\ndget tipos hielo b\ndhas tipos agua h1\nddel tipos agua\ndhas tipos agua h2\ndlen tipos n\nsay {a}|{b}|{h1}{h2}{n}");
+    expect(r.log).toEqual(["say:Rojo||102"]);
+  });
+  it("substr, replace y num", async () => {
+    const r = await run("setstr t Hola mundo\nsubstr t 5 5 s\nreplace t mundo | Pokémon\nsetstr q 42\nnum q v\nadd v 1\nsay {s} - {t} - {v}");
+    expect(r.log).toEqual(["say:mundo - Hola Pokémon - 43"]);
+    for (const bad of ["nlist a | b", "nget l 0", "dict d clave", "dset d k", "substr a 1", "replace t solo", "num q"]) expect(parseScript(bad).ok, bad).toBe(false);
+  });
+  it("transformación: se pide una vez por combate, sube las estadísticas y se anuncia", async () => {
+    const e = await Engine.load(wasm());
+    const p = archipelagoProject();
+    const damage = (form: boolean, seed = 21) => {
+      e.reset(8, 8, seed);
+      const me = makeMon(p, "infernal", 40, "cristal"), foe = makeMon(p, "selvatico", 90);
+      const full = foe.hp;
+      me.moves = ["lanzallamas"];
+      const b = new Battle(p, e, [me], [foe], { trainer: "T", inv: {} });
+      expect(b.canForm(0)).toBe(true);
+      const ev = b.turn({ kind: "move", index: 0, form });
+      const used = b.formUsed;
+      const hp = full - foe.hp; // PS perdidos
+      return { text: ev.map((x) => x.text), used, hp, again: b.canForm(0) };
+    };
+    const plain = damage(false), formed = damage(true);
+    let sumPlain = 0, sumFormed = 0;
+    for (let seed = 1; seed <= 12; seed++) { sumPlain += damage(false, seed).hp; sumFormed += damage(true, seed).hp; }
+    expect(plain.used).toBe(false);
+    expect(formed.used).toBe(true);
+    expect(formed.again).toBe(false);
+    expect(formed.text.some((t) => t.includes("se transforma"))).toBe(true);
+    expect(sumFormed).toBeGreaterThan(sumPlain * 1.1); // en promedio, +30 % de Ataque Especial
+  });
+  it("serializeScript/deserializeScript: ida y vuelta idéntica y rechazo de saltos o operaciones inválidas", async () => {
+    const r = parseScript("set n 3\nwhile n > 0\nadd n -1\nsay vuelta {n}\nend\ndef f\nsay hola\nend\ncall f");
+    if (!r.ok) throw new Error(r.errors.join());
+    const back = deserializeScript(serializeScript(r.code));
+    expect(back).toEqual(r.code);
+    const e = await Engine.load(wasm());
+    e.flagsReset();
+    const log: string[] = [];
+    await runScript(back, { choose: async () => 0, equip: () => {}, say: async (l) => { log.push(l.join("|")); }, give: () => {}, heal: () => {}, battle: async () => {}, givemon: () => {}, warp: async () => {} }, e);
+    expect(log.join(",")).toBe("vuelta 2|vuelta 1|vuelta 0|hola");
+    expect(() => deserializeScript('{"v":1,"code":[{"op":"jmp","to":99}]}')).toThrow();
+    expect(() => deserializeScript('{"v":1,"code":[{"op":"explota"}]}')).toThrow();
+    expect(() => deserializeScript("{}")).toThrow();
   });
   it("equip se delega en el juego y sus argumentos se validan", async () => {
     const e = await Engine.load(wasm());
@@ -514,7 +565,7 @@ describe("combate: clima, terreno, multigolpe, carga/recarga, precisión y objet
     const v4 = { ...defaultProject(), schemaVersion: 4 } as Record<string, unknown>;
     delete v4.weatherRules;
     const p = migrate(v4);
-    expect(p.schemaVersion).toBe(5);
+    expect(p.schemaVersion).toBe(6);
     expect(p.weatherRules.sun.boost).toBe(1); // Fuego
     expect(p.weatherRules.rain.boost).toBe(2); // Agua
     expect(p.weatherRules.sand.chip).toBe(true);

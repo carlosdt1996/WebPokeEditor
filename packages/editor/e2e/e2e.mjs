@@ -628,7 +628,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   const path = join(tmpdir(), "e2e-proyecto.wpe.json");
   await dl.saveAs(path);
   const json = JSON.parse(readFileSync(path, "utf8"));
-  eq([json.name, json.schemaVersion, json.maps.length, json.items.length], ["Proyecto E2E", 5, 3, 9], "contenido exportado");
+  eq([json.name, json.schemaVersion, json.maps.length, json.items.length], ["Proyecto E2E", 6, 3, 9], "contenido exportado");
   await newExample(page);
   eq(await W(page, () => window.__wpe.project.name), "Mi Fangame", "tras Nuevo");
   await page.locator("header input[type=file]").setInputFiles(path);
@@ -638,7 +638,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   const p1 = join(tmpdir(), "e2e-v1.json"); writeFileSync(p1, JSON.stringify(v1));
   await page.locator("header input[type=file]").setInputFiles(p1);
   await page.waitForFunction(() => window.__wpe.project.name === "Antiguo");
-  eq(await W(page, () => [window.__wpe.project.schemaVersion, window.__wpe.project.maps[0].w]), [5, 6], "migración v1→v5");
+  eq(await W(page, () => [window.__wpe.project.schemaVersion, window.__wpe.project.maps[0].w]), [6, 6], "migración v1→v6");
   // JSON inválido → mensaje y el proyecto no cambia
   const bad = join(tmpdir(), "e2e-bad.json"); writeFileSync(bad, JSON.stringify({ ...v1, encounters: ["fantasma"] }));
   let msg = ""; page.removeAllListeners("dialog"); page.on("dialog", (d) => { msg = d.message(); d.accept(); });
@@ -674,7 +674,7 @@ await test("región «Archipiélago de la Marea»: plantilla, compañero inicial
   await page.click("header button:has-text('Nuevo')");
   await page.click(".tpl:has-text('Archipiélago')");
   await page.waitForFunction(() => window.__wpe.project.name === "Archipiélago de la Marea", null, { timeout: 8000 });
-  eq(await W(page, () => window.__wpe.project.maps.length), 21, "mapas de la plantilla");
+  eq(await W(page, () => window.__wpe.project.maps.length), 38, "mapas de la plantilla");
   await page.click("text=▶ Probar");
   await page.waitForTimeout(300);
   eq(await W(page, () => window.__wpe.view.game.map.id), "brisa", "empieza en Pueblo Brisa");

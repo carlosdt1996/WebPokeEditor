@@ -113,9 +113,11 @@ export class Engine {
   private strVars = new Map<string, string>();
   /** Listas de texto de los scripts (viven en JS; se reinician con cada partida). */
   readonly lists = new Map<string, string[]>();
+  readonly nlists = new Map<string, number[]>();
+  readonly dicts = new Map<string, Map<string, string>>();
   getStr(name: string) { return this.strVars.get(name); }
   setStr(name: string, text: string) { this.strVars.set(name, text); }
-  flagsReset() { this.flagIds.clear(); this.varIds.clear(); this.strVars.clear(); this.lists.clear(); this.x.vm_flags_reset(); }
+  flagsReset() { this.flagIds.clear(); this.varIds.clear(); this.strVars.clear(); this.lists.clear(); this.nlists.clear(); this.dicts.clear(); this.x.vm_flags_reset(); }
   hasFlag(name: string) { return this.x.vm_flag_get(this.flagId(name)) === 1; }
   setFlag(name: string, on: boolean) { this.x.vm_flag_set(this.flagId(name), on ? 1 : 0); }
   vmLoad(words: Uint32Array) {
