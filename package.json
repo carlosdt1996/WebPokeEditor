@@ -1,0 +1,12 @@
+{
+  "name": "webpokeeditor",
+  "private": true,
+  "scripts": {
+    "wasm": "bash scripts/build-wasm.sh",
+    "dev": "npm run wasm && npm run dev -w packages/editor",
+    "build": "npm run wasm && npm run build -w packages/editor",
+    "test": "cargo test --workspace && npm test -w packages/editor",
+    "typecheck": "npm run typecheck -w packages/editor"
+  },
+  "workspaces": ["packages/*"]
+}

@@ -2,7 +2,25 @@
 
 Creador de **fangames de Pokémon** que corre íntegramente en el navegador, usando **WebAssembly** (núcleo del motor y herramientas) y **WebGPU** (renderizado del mapa, sprites y vista previa del juego).
 
-> Estado: fase de diseño. Ver [`ROADMAP.md`](ROADMAP.md).
+> **Demo en vivo:** https://carlosdt1996.github.io/WebPokeEditor/
+>
+> Estado: MVP funcional. Ver [`ROADMAP.md`](ROADMAP.md).
+
+## Qué hay ya
+- **Editor de mapas** (pintar, rellenar, cuentagotas, punto de inicio, deshacer/rehacer, zoom/pan, redimensionar).
+- **Render WebGPU** (tilemap instanciado + sprites) con **fallback Canvas 2D**.
+- **Núcleo Rust → WASM** determinista: movimiento en grid, colisiones, encuentros en hierba alta, fórmula de daño.
+- **Modo Probar**: camina por tu mapa y encuentra criaturas salvajes.
+- **Editor de datos** (especies, movimientos, encuentros) y **calculadora de combate** (corre en WASM).
+- Guardado local automático + **importar/exportar** proyecto (`.wpe.json`).
+
+## Empezar
+```bash
+npm install
+npm run dev      # compila el WASM y levanta Vite
+npm test         # cargo test + vitest
+```
+Requiere Rust (`rustup target add wasm32-unknown-unknown`) y Node 20+.
 
 ## Visión
 
@@ -34,17 +52,14 @@ Una herramienta tipo "RPG Maker para Pokémon" sin instalación: editas mapas, P
 
 ```
 WebPokeEditor/
-├── crates/              # Rust → WASM
-│   ├── engine-core/     # ECS, mapas, colisiones, estado de juego
-│   ├── battle/          # Simulación de combate (determinista)
-│   ├── script-vm/       # Máquina virtual de scripts
-│   └── project-io/      # (De)serialización y validación de proyectos
-├── packages/            # TypeScript
-│   ├── renderer/        # WebGPU (WGSL)
-│   ├── editor/          # UI del editor
-│   ├── player/          # Runtime jugable embebible
-│   └── shared/          # Tipos y utilidades comunes
-├── assets/              # Assets propios/libres de ejemplo
+├── crates/
+│   └── engine-core/     # Rust → WASM: mapa, movimiento, encuentros, daño   (hecho)
+│       (previstos: battle, script-vm, project-io)
+├── packages/
+│   └── editor/          # Editor web (TS + Vite + WebGPU)                    (hecho)
+│       (previstos: player, shared)
+├── scripts/build-wasm.sh
+├── .github/workflows/pages.yml   # CI + despliegue a GitHub Pages
 ├── docs/
 └── tests/
 ```

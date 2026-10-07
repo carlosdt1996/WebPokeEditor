@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["crates/engine-core"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+codegen-units = 1
+strip = true
