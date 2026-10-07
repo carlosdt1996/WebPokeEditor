@@ -61,6 +61,7 @@ export class MapView {
   private acc = 0;
   private last = 0;
   private advance: (() => void) | null = null;
+  private choiceKeys: ((code: string) => void) | null = null;
   private project!: Project;
   private editIndex = 0;
   private curIndex = 0;
@@ -220,6 +221,7 @@ export class MapView {
       dialog: (who, lines) => this.dialog(who, lines),
       battle: async (b: Battle) => { await runBattleUi(this.el, this.project, b); },
       say: (m) => this.onMessage(m),
+      choose: (o) => this.choose(o),
     };
     this.game = new Game(this.project, this.engine, host);
     this.game.start();
@@ -239,6 +241,25 @@ export class MapView {
     stopMusic();
     this.loadIntoEngine(this.editIndex, false);
     this.fit();
+  }
+
+  /** Menú de elección sobre el viewport: clic, flechas ↑↓ y Enter/Espacio/Z. */
+  private choose(options: string[]): Promise<number> {
+    return new Promise((res) => {
+      let sel = 0;
+      const box = h("div", { class: "choice" });
+      const draw = () => {
+        box.replaceChildren(...options.map((o, i) => h("button", { class: i === sel ? "sel" : "", onclick: (e: Event) => { e.stopPropagation(); done(i); } }, (i === sel ? "▶ " : "   ") + o)));
+      };
+      const done = (i: number) => { this.choiceKeys = null; box.remove(); res(i); };
+      this.choiceKeys = (code) => {
+        if (code === "ArrowUp" || code === "KeyW") { sel = (sel + options.length - 1) % options.length; draw(); }
+        else if (code === "ArrowDown" || code === "KeyS") { sel = (sel + 1) % options.length; draw(); }
+        else if (code === "Enter" || code === "Space" || code === "KeyZ") done(sel);
+      };
+      draw();
+      this.el.append(box);
+    });
   }
 
   private dialog(speaker: string | null, lines: string[]): Promise<void> {
@@ -410,6 +431,7 @@ export class MapView {
       if (e.code === "Space") this.spaceDown = true;
       if (this.playing) {
         if (e.code.startsWith("Arrow") || e.code === "Space" || e.code === "Enter") e.preventDefault();
+        if (this.choiceKeys) { if (!e.repeat) this.choiceKeys(e.code); this.keys.add(e.code); return; }
         if (!e.repeat && (e.code === "Enter" || e.code === "Space" || e.code === "KeyZ")) {
           if (this.advance) this.advance(); else this.game?.interact();
         }

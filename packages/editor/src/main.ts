@@ -127,7 +127,7 @@ async function main() {
   const sizeInfo = h("span", { class: "muted" });
   const sizeLabel = () => (sizeInfo.textContent = `${engine.width}×${engine.height} tiles · ${view.map?.npcs.length ?? 0} NPC · ${view.map?.warps.length ?? 0} saltos · ${view.map?.triggers?.length ?? 0} disparadores`);
   const wIn = h("input", { type: "number", min: 4, max: 128, class: "n" }), hIn = h("input", { type: "number", min: 4, max: 128, class: "n" });
-  const sync = () => { wIn.value = String(engine.width); hIn.value = String(engine.height); refreshMaps(); sizeLabel(); };
+  const sync = () => { wIn.value = String(engine.width); hIn.value = String(engine.height); refreshMaps(); sizeLabel(); if (typeof renderEnter === "function") renderEnter(); };
   const sizeBox = h("div", { class: "row" }, "Tamaño", wIn, "×", hIn,
     h("button", { onclick: () => { view.resizeMap(Math.min(128, Math.max(4, +wIn.value || 4)), Math.min(128, Math.max(4, +hIn.value || 4))); sync(); } }, "Aplicar"));
 
@@ -203,6 +203,12 @@ async function main() {
   view.onSelect = renderInspector;
   renderInspector(null);
 
+  // ---------- Script "al entrar al mapa" ----------
+  const enterBox = h("div", { class: "inspector" });
+  const renderEnter = () => {
+    enterBox.replaceChildren(...scriptEditor(() => view.map.onEnter ?? "", (v) => { view.map.onEnter = v.trim() ? v : undefined; }));
+  };
+
   // ---------- Barra superior y modos ----------
   const playBtn = h("button", { class: "primary" }, "▶ Probar");
   const btn3d = h("button", { title: "Vista 3D estilo DS (requiere WebGPU). Q/E giran la cámara; arrastra para orbitar." }, "🧊 3D");
@@ -218,6 +224,7 @@ async function main() {
     h("div", { class: "row" }, mapSelect),
     h("div", { class: "row" }, h("button", { onclick: newMap }, "+ Nuevo"), h("button", { onclick: renameMap }, "Renombrar"), h("button", { class: "danger", onclick: deleteMap }, "Eliminar")),
     sizeBox, sizeInfo,
+    h("h3", {}, "Al entrar al mapa"), enterBox,
     h("h3", {}, "Inspector"), inspector,
     h("p", { class: "hint" }, "Rueda: zoom · Clic derecho / Espacio+arrastrar: mover · Ctrl+Z / Ctrl+Y: deshacer/rehacer · Supr: borrar selección"),
   );

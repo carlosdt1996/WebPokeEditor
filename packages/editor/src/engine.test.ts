@@ -142,7 +142,7 @@ describe("scripts (VM en Rust)", () => {
     return {
       log,
       ctx: {
-        say: async (l: string[]) => { log.push("say:" + l.join("|")); },
+        choose: async () => 0, say: async (l: string[]) => { log.push("say:" + l.join("|")); },
         give: (i: string, n: number) => { log.push(`give:${i}:${n}`); },
         heal: () => { log.push("heal"); },
         battle: async (s: string, l: number) => { log.push(`battle:${s}:${l}`); },
@@ -203,7 +203,7 @@ describe("scripts: variables, bucles y disparadores", () => {
     if (!r.ok) throw new Error(r.errors.join());
     const log: string[] = [];
     await runScript(r.code, {
-      say: async (l) => { log.push("say:" + l.join("|")); }, give: (i, n) => { log.push(`give:${i}:${n}`); }, heal: () => { log.push("heal"); },
+      choose: async () => 0, say: async (l) => { log.push("say:" + l.join("|")); }, give: (i, n) => { log.push(`give:${i}:${n}`); }, heal: () => { log.push("heal"); },
       battle: async (s, l) => { log.push(`battle:${s}:${l}`); }, givemon: (s, l) => { log.push(`givemon:${s}:${l}`); }, warp: async (m) => { log.push(`warp:${m}`); },
     }, e);
     return { log, e };
@@ -240,6 +240,27 @@ describe("scripts: variables, bucles y disparadores", () => {
   });
   it("errores de sintaxis nuevos", () => {
     for (const bad of ["if x ~ 3\nend", "while x < a\nend", "repeat\nend", "break", "else", "set x", "add 1x 3", "while\nend"]) expect(parseScript(bad).ok).toBe(false);
+  });
+  it("funciones: call/return, recursión acotada y errores de definición", async () => {
+    const a = await run("def saluda\nsay hola {n}\nadd n 1\nend\ncall saluda\ncall saluda\ncall saluda");
+    expect(a.log).toEqual(["say:hola 0|hola 1|hola 2"]); // los say consecutivos se agrupan en un cuadro
+    const b = await run("def f\nif n >= 1\nreturn\nend\nadd n 1\nsay dentro\nend\ncall f\ncall f\nsay fuera");
+    expect(b.log).toEqual(["say:dentro|fuera"]);
+    const c = await run("call tarde\ndef tarde\nsay ok\nend");
+    expect(c.log).toEqual(["say:ok"]);
+    await expect(run("def r\ncall r\nend\ncall r")).rejects.toThrow(/VM/);
+    for (const bad of ["call nada", "def a\ndef b\nend\nend", "def x\nend\ndef x\nend", "def y\nsay x", "repeat 2\ndef z\nbreak\nend\nend"]) expect(parseScript(bad).ok).toBe(false);
+  });
+  it("setstr, {interpolación de texto} y choice guardan la elección en la variable", async () => {
+    const e = await Engine.load(wasm());
+    e.flagsReset();
+    const r = parseScript("setstr nombre Ana\nsay Hola {nombre}\nchoice Sí {nombre} | No | Quizá\nif choice == 1\nsay dijo no\nelse\nsay otra\nend");
+    if (!r.ok) throw new Error(r.errors.join());
+    const log: string[] = [];
+    await runScript(r.code, { choose: async (o) => { log.push("opts:" + o.join("/")); return 1; }, say: async (l) => { log.push("say:" + l.join("|")); }, give: () => {}, heal: () => {}, battle: async () => {}, givemon: () => {}, warp: async () => {} }, e);
+    expect(log).toEqual(["say:Hola Ana", "opts:Sí Ana/No/Quizá", "say:dijo no"]);
+    expect(e.getVar("choice")).toBe(1);
+    expect(parseScript("choice solo").ok).toBe(false);
   });
   it("el proyecto valida los scripts de los disparadores y su posición", () => {
     const p = defaultProject();

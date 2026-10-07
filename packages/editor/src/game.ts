@@ -11,6 +11,8 @@ export interface Host {
   dialog(speaker: string | null, lines: string[]): Promise<void>;
   battle(b: Battle): Promise<void>;
   say(msg: string): void;
+  /** Menú de opciones; devuelve el índice elegido. */
+  choose(options: string[]): Promise<number>;
 }
 
 const DIRS = [[0, 1], [0, -1], [-1, 0], [1, 0]]; // abajo, arriba, izq, der
@@ -37,6 +39,20 @@ export class Game {
     const i = Math.max(0, this.p.maps.findIndex((m) => m.id === this.p.start.map));
     this.mapIndex = i;
     this.host.loadMap(i, this.p.start.x, this.p.start.y);
+    void this.run(() => this.runMapEnter());
+  }
+
+  private enterDepth = 0;
+  /** Ejecuta el script "al entrar" del mapa actual (si lo tiene). Acotado para evitar warps encadenados infinitos. */
+  private async runMapEnter() {
+    const src = this.map.onEnter?.trim();
+    if (!src || this.enterDepth >= 5) return;
+    const r = parseScript(src);
+    if (!r.ok) { this.host.say(`Script de entrada de ${this.map.name} con errores: ${r.errors[0]}`); return; }
+    this.enterDepth++;
+    try { this.refreshBuiltins(); await runScript(r.code, this.scriptCtx(null, null), this.e); }
+    catch (err) { this.host.say((err as Error).message); }
+    finally { this.enterDepth--; }
   }
   npcDir(n: Npc) { return this.npcDirs.get(this.map.id + "/" + n.id) ?? n.dir; }
   private key(n: Npc) { return this.map.id + "/" + n.id; }
@@ -99,6 +115,7 @@ export class Game {
     this.mapIndex = i;
     this.host.loadMap(i, x, y);
     this.host.say(`Entras en ${this.map.name}.`);
+    await this.runMapEnter();
   }
 
   /** Interactuar con la celda que se tiene delante. */
@@ -137,6 +154,7 @@ export class Game {
       battle: async (sp, lv) => { await this.fight([makeMon(this.p, sp, lv)]); },
       givemon: (sp, lv) => { if (this.party.length < 6) { this.party.push(makeMon(this.p, sp, lv)); sfx("catch"); this.host.say("¡Un nuevo compañero se une a tu equipo!"); } },
       warp: (m, x, y) => this.warpTo(m, x, y),
+      choose: (o) => this.host.choose(o),
     };
   }
 
@@ -170,6 +188,7 @@ export class Game {
       await this.host.dialog(null, ["Todo se vuelve negro...", "Te llevan de vuelta al inicio y curan a tu equipo."]);
       this.mapIndex = Math.max(0, this.p.maps.findIndex((m) => m.id === this.p.start.map));
       this.host.loadMap(this.mapIndex, this.p.start.x, this.p.start.y);
+      await this.runMapEnter();
     }
     return b.result;
   }

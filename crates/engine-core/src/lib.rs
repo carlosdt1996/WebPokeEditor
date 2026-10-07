@@ -333,6 +333,11 @@ pub const VM_HEAL: u32 = 3;
 pub const VM_BATTLE: u32 = 4;
 pub const VM_GIVEMON: u32 = 5;
 pub const VM_WARP: u32 = 6;
+/// a = índice en la tabla de cadenas de las opciones separadas por `|`; el host escribe el resultado en la variable `choice`.
+pub const VM_CHOICE: u32 = 7;
+/// a = nombre, b = texto (índices de la tabla de cadenas): variable de texto, resuelta por el host.
+pub const VM_SETSTR: u32 = 8;
+pub const VM_STACK: usize = 16;
 pub const VM_ERR: u32 = 255;
 
 const OP_FLAG: u32 = 10;
@@ -344,6 +349,8 @@ const OP_ADD: u32 = 21;
 /// CMP a=var b=comparador c=valor: guarda el resultado; JNC a=destino salta si fue falso.
 const OP_CMP: u32 = 22;
 const OP_JNC: u32 = 23;
+const OP_CALL: u32 = 30;
+const OP_RET: u32 = 31;
 
 pub struct Vm {
     code: [u32; VM_MAX_INSTR * 4],
@@ -352,16 +359,19 @@ pub struct Vm {
     flags: [u8; VM_FLAGS],
     vars: [i32; VM_VARS],
     cmp: bool,
+    stack: [usize; VM_STACK],
+    sp: usize,
     args: [u32; 3],
 }
 
 impl Vm {
     pub const fn new() -> Self {
-        Vm { code: [0; VM_MAX_INSTR * 4], len: 0, pc: 0, flags: [0; VM_FLAGS], vars: [0; VM_VARS], cmp: false, args: [0; 3] }
+        Vm { code: [0; VM_MAX_INSTR * 4], len: 0, pc: 0, flags: [0; VM_FLAGS], vars: [0; VM_VARS], cmp: false, stack: [0; VM_STACK], sp: 0, args: [0; 3] }
     }
     pub fn load(&mut self, n_instr: usize) {
         self.len = n_instr.min(VM_MAX_INSTR);
         self.pc = 0;
+        self.sp = 0;
     }
     /// Ejecuta hasta el siguiente evento del host. 0 = fin del script.
     pub fn run(&mut self) -> u32 {
@@ -375,7 +385,7 @@ impl Vm {
             let (op, a, b, c) = (self.code[i], self.code[i + 1], self.code[i + 2], self.code[i + 3]);
             self.pc += 1;
             match op {
-                VM_SAY | VM_GIVE | VM_HEAL | VM_BATTLE | VM_GIVEMON | VM_WARP => {
+                VM_SAY | VM_GIVE | VM_HEAL | VM_BATTLE | VM_GIVEMON | VM_WARP | VM_CHOICE | VM_SETSTR => {
                     self.args = [a, b, c];
                     return op;
                 }
@@ -390,6 +400,15 @@ impl Vm {
                     }
                 }
                 OP_JMP => self.pc = a as usize,
+                OP_CALL => {
+                    if self.sp >= VM_STACK { return VM_ERR; }
+                    self.stack[self.sp] = self.pc;
+                    self.sp += 1;
+                    self.pc = a as usize;
+                }
+                OP_RET => {
+                    if self.sp == 0 { self.pc = self.len; } else { self.sp -= 1; self.pc = self.stack[self.sp]; }
+                }
                 OP_SET => self.vars[(a as usize) % VM_VARS] = b as i32,
                 OP_ADD => {
                     let v = &mut self.vars[(a as usize) % VM_VARS];
@@ -633,5 +652,24 @@ mod tests {
         v.code[0..4].copy_from_slice(&[OP_CMP, 0, 9, 0]);
         v.load(1);
         assert_eq!(v.run(), VM_ERR);
+    }
+
+    #[test]
+    fn vm_call_ret_and_depth_limit() {
+        let mut v = Vm::new();
+        // 0: CALL 3 ; 1: CALL 3 ; 2: JMP 5 ; 3: ADD x 1 ; 4: RET ; 5: HEAL
+        let prog: [[u32; 4]; 6] = [[OP_CALL, 3, 0, 0], [OP_CALL, 3, 0, 0], [OP_JMP, 5, 0, 0], [OP_ADD, 0, 1, 0], [OP_RET, 0, 0, 0], [VM_HEAL, 0, 0, 0]];
+        for (i, w) in prog.iter().enumerate() { v.code[i * 4..i * 4 + 4].copy_from_slice(w); }
+        v.load(6);
+        assert_eq!(v.run(), VM_HEAL);
+        assert_eq!(v.vars[0], 2);
+        // recursión infinita: la pila está acotada
+        v.code[0..4].copy_from_slice(&[OP_CALL, 0, 0, 0]);
+        v.load(1);
+        assert_eq!(v.run(), VM_ERR);
+        // RET sin llamada termina el script
+        v.code[0..4].copy_from_slice(&[OP_RET, 0, 0, 0]);
+        v.load(1);
+        assert_eq!(v.run(), 0);
     }
 }

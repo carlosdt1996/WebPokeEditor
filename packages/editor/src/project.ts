@@ -41,6 +41,8 @@ export interface GameMap {
   id: string; name: string; w: number; h: number; tiles: string;
   npcs: Npc[]; warps: Warp[];
   triggers?: Trigger[];
+  /** Script que se ejecuta al entrar en el mapa (por salto, al empezar o al volver tras perder). */
+  onEnter?: string;
   /** Capa de objetos (base64 u8, 0 = vacío): decoración sobre el suelo, con transparencia. */
   objects?: string;
   /** Altura por casilla para el modo 3D (base64 de Int8 + 128; unidades de 0,25 tiles). */
@@ -172,6 +174,7 @@ export function defaultProject(): Project {
         encounterLevel: [2, 4],
       }),
       mapOf("casa", "Tu casa", home, {
+        onEnter: "if mama_saluda\nreturn\nend\nflag mama_saluda\nsay (Mamá) ¡Has vuelto a casa!",
         warps: [{ x: 5, y: 7, toMap: "pueblo", toX: 5, toY: 5 }],
         npcs: [
           { id: "mama", x: 3, y: 3, look: 0, dir: 0, kind: "talk", name: "Mamá", lines: ["¡Buenos días, cariño!", "Tu equipo ya está listo. ¡Ten cuidado ahí fuera!"] },
@@ -286,6 +289,7 @@ export function validate(p: Project): string[] {
       if (n.kind === "trainer" && !(n.team?.length)) errs.push(`${m.name}: el entrenador "${n.name}" no tiene equipo`);
       if (n.kind === "trainer" && n.double && (n.team?.length ?? 0) < 2) errs.push(`${m.name}: el entrenador "${n.name}" necesita 2+ criaturas para un combate doble`);
     }
+    if (m.onEnter) checkScript(m.onEnter, `${m.name}: script de entrada`);
     for (const t of m.triggers ?? []) {
       if (t.x >= m.w || t.y >= m.h) errs.push(`${m.name}: disparador "${t.name}" fuera del mapa`);
       checkScript(t.script, `${m.name}: disparador "${t.name}"`);

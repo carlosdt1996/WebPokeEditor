@@ -108,7 +108,10 @@ export class Engine {
   }
   getVar(name: string) { return this.x.vm_var_get(this.varId(name)); }
   setVar(name: string, v: number) { this.x.vm_var_set(this.varId(name), v | 0); }
-  flagsReset() { this.flagIds.clear(); this.varIds.clear(); this.x.vm_flags_reset(); }
+  private strVars = new Map<string, string>();
+  getStr(name: string) { return this.strVars.get(name); }
+  setStr(name: string, text: string) { this.strVars.set(name, text); }
+  flagsReset() { this.flagIds.clear(); this.varIds.clear(); this.strVars.clear(); this.x.vm_flags_reset(); }
   hasFlag(name: string) { return this.x.vm_flag_get(this.flagId(name)) === 1; }
   setFlag(name: string, on: boolean) { this.x.vm_flag_set(this.flagId(name), on ? 1 : 0); }
   vmLoad(words: Uint32Array) {

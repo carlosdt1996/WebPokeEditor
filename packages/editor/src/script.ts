@@ -18,7 +18,11 @@ export type Instr =
   | { op: "jmp"; to: number }
   | { op: "battle"; species: string; level: number }
   | { op: "givemon"; species: string; level: number }
-  | { op: "warp"; map: string; x: number; y: number };
+  | { op: "warp"; map: string; x: number; y: number }
+  | { op: "call"; name: string; to: number }
+  | { op: "ret" }
+  | { op: "choice"; options: string[] }
+  | { op: "setstr"; name: string; text: string };
 
 export const SCRIPT_HELP = `say <texto>            muestra un mensaje; {var} se sustituye por el valor de la variable
 give <objeto> <n>      da objetos (ids de la pestaña Datos: potion, ball...)
@@ -31,6 +35,9 @@ else / end                     cierran las condiciones
 while <condición> ... end      bucle (mismas condiciones; whilenot <marca>)
 repeat <n> ... end             repite n veces
 break                          sale del bucle más interno
+def <nombre> ... end           define una función; call <nombre> la ejecuta; return sale de ella
+choice <A> | <B> | <C>         menú de opciones; guarda el índice elegido (0, 1, 2…) en la variable choice
+setstr <nombre> <texto>        variable de texto; se usa como {nombre} en say y choice
 battle <especie> <nivel>   combate contra una criatura
 givemon <especie> <nivel>  añade una criatura al equipo
 warp <mapa> <x> <y>        teletransporta al jugador
@@ -40,12 +47,14 @@ Variables predefinidas al empezar: steps (pasos), party (nº de criaturas), leve
 export type ParseResult = { ok: true; code: Instr[] } | { ok: false; errors: string[] };
 
 const IDENT = /^[A-Za-z_][\w-]*$/;
-type Frame = { kind: "if" | "while" | "repeat"; cond: number; jmp?: number; start?: number; hv?: string; breaks: number[] };
+type Frame = { kind: "if" | "while" | "repeat" | "def"; cond: number; jmp?: number; start?: number; hv?: string; breaks: number[] };
 
 export function parseScript(src: string): ParseResult {
   const code: Instr[] = [];
   const errors: string[] = [];
   const stack: Frame[] = [];
+  const funcs = new Map<string, number>();
+  const calls: { idx: number; name: string; line: number }[] = [];
   let hidden = 0;
   src.split("\n").forEach((raw, i) => {
     const line = raw.trim();
@@ -111,8 +120,35 @@ export function parseScript(src: string): ParseResult {
         if (top.cond >= 0) patch(top.cond, code.length);
         break;
       }
+      case "def": {
+        const n = ident(rest[0]);
+        if (stack.some((f) => f.kind === "def")) { err("no se puede definir una función dentro de otra"); stack.push({ kind: "def", cond: -1, breaks: [] }); break; }
+        if (n && funcs.has(n)) err(`la función "${n}" ya está definida`);
+        stack.push({ kind: "def", cond: -1, jmp: code.length, breaks: [] });
+        code.push({ op: "jmp", to: -1 }); // salta por encima del cuerpo
+        if (n) funcs.set(n, code.length);
+        break;
+      }
+      case "call": {
+        const n = ident(rest[0]);
+        if (n) { calls.push({ idx: code.length, name: n, line: i + 1 }); code.push({ op: "call", name: n, to: -1 }); }
+        break;
+      }
+      case "return": code.push({ op: "ret" }); break;
+      case "setstr": {
+        const n = ident(rest[0]);
+        if (!rest[1]) { err("uso: setstr <nombre> <texto>"); break; }
+        if (n) code.push({ op: "setstr", name: n, text: rest.slice(1).join(" ") });
+        break;
+      }
+      case "choice": {
+        const opts = arg.split("|").map((x) => x.trim()).filter(Boolean);
+        if (opts.length < 2 || opts.length > 6) err("choice necesita entre 2 y 6 opciones separadas por |"); else code.push({ op: "choice", options: opts });
+        break;
+      }
       case "break": {
-        const loop = [...stack].reverse().find((f) => f.kind !== "if");
+        let loop: Frame | undefined;
+        for (let k = stack.length - 1; k >= 0 && stack[k].kind !== "def"; k--) if (stack[k].kind !== "if") { loop = stack[k]; break; }
         if (!loop) { err("break fuera de un bucle"); break; }
         loop.breaks.push(code.length);
         code.push({ op: "jmp", to: -1 });
@@ -121,7 +157,10 @@ export function parseScript(src: string): ParseResult {
       case "end": {
         const top = stack.pop();
         if (!top) { err("end sin if/while/repeat"); break; }
-        if (top.kind === "if") {
+        if (top.kind === "def") {
+          code.push({ op: "ret" });
+          if (top.jmp !== undefined) patch(top.jmp, code.length);
+        } else if (top.kind === "if") {
           if (top.jmp !== undefined) patch(top.jmp, code.length); else if (top.cond >= 0) patch(top.cond, code.length);
         } else {
           if (top.kind === "repeat" && top.hv) code.push({ op: "add", name: top.hv, delta: -1 });
@@ -144,6 +183,11 @@ export function parseScript(src: string): ParseResult {
       default: err(`comando desconocido "${cmdRaw}"`);
     }
   });
+  for (const c of calls) {
+    const to = funcs.get(c.name);
+    if (to === undefined) errors.push(`línea ${c.line}: la función "${c.name}" no está definida`);
+    else { const ins = code[c.idx]; if (ins.op === "call") ins.to = to; }
+  }
   if (stack.length) errors.push(`falta${stack.length > 1 ? "n" : ""} ${stack.length} "end"`);
   return errors.length ? { ok: false, errors } : { ok: true, code };
 }
@@ -155,10 +199,12 @@ export interface ScriptCtx {
   battle(species: string, level: number): Promise<void>;
   givemon(species: string, level: number): void;
   warp(map: string, x: number, y: number): Promise<void>;
+  /** Muestra un menú y devuelve el índice elegido. */
+  choose(options: string[]): Promise<number>;
 }
 
 /** Códigos de operación del bytecode (deben coincidir con crates/engine-core). */
-const OP = { say: 1, give: 2, heal: 3, battle: 4, givemon: 5, warp: 6, flag: 10, unflag: 11, jif: 12, jmp: 13, set: 20, add: 21, cmp: 22, jnc: 23 } as const;
+const OP = { say: 1, give: 2, heal: 3, battle: 4, givemon: 5, warp: 6, choice: 7, setstr: 8, flag: 10, unflag: 11, jif: 12, jmp: 13, set: 20, add: 21, cmp: 22, jnc: 23, call: 30, ret: 31 } as const;
 
 /** Compila las instrucciones a bytecode de 4 palabras + tabla de cadenas (la VM solo maneja números). */
 export function compileScript(code: Instr[], engine: Pick<Engine, "flagId" | "varId">): { words: Uint32Array; strings: string[] } {
@@ -187,6 +233,10 @@ export function compileScript(code: Instr[], engine: Pick<Engine, "flagId" | "va
       case "battle": put(k, [OP.battle, sid(ins.species), ins.level, 0]); break;
       case "givemon": put(k, [OP.givemon, sid(ins.species), ins.level, 0]); break;
       case "warp": put(k, [OP.warp, sid(ins.map), ins.x, ins.y]); break;
+      case "call": put(k, [OP.call, at[ins.to], 0, 0]); break;
+      case "ret": put(k, [OP.ret, 0, 0, 0]); break;
+      case "choice": put(k, [OP.choice, sid(ins.options.join("|")), 0, 0]); break;
+      case "setstr": put(k, [OP.setstr, sid(ins.name), sid(ins.text), 0]); break;
     }
   });
   return { words, strings };
@@ -201,7 +251,8 @@ export async function runScript(code: Instr[], ctx: ScriptCtx, engine: Engine, m
   for (let events = 0; ; events++) {
     if (events > maxEvents) throw new Error("El script ejecuta demasiadas acciones (¿bucle infinito?)");
     const ev = engine.vmRun();
-    if (ev === OP.say) { lines.push(strings[engine.vmArg(0)].replace(/\{([A-Za-z_][\w-]*)\}/g, (_, n: string) => String(engine.getVar(n)))); continue; }
+    const interp = (t: string) => t.replace(/\{([A-Za-z_][\w-]*)\}/g, (_, n: string) => engine.getStr(n) ?? String(engine.getVar(n)));
+    if (ev === OP.say) { lines.push(interp(strings[engine.vmArg(0)])); continue; }
     await flush();
     if (ev === 0) return;
     if (ev === 255) throw new Error("Error en la VM de scripts (¿bucle infinito sin acciones?)");
@@ -210,6 +261,8 @@ export async function runScript(code: Instr[], ctx: ScriptCtx, engine: Engine, m
     else if (ev === OP.heal) ctx.heal();
     else if (ev === OP.battle) await ctx.battle(strings[a], b);
     else if (ev === OP.givemon) ctx.givemon(strings[a], b);
+    else if (ev === OP.setstr) engine.setStr(strings[a], interp(strings[b]));
+    else if (ev === OP.choice) engine.setVar("choice", await ctx.choose(strings[a].split("|").map(interp)));
     else if (ev === OP.warp) { await ctx.warp(strings[a], b, c); return; } // el mapa cambia: termina el script
   }
 }
