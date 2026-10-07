@@ -164,8 +164,8 @@ const abilities = (): Project["abilities"] => [
 const PRICES: [string, string, number][] = [["potion", "Poción", 100], ["superpotion", "Superpoción", 300], ["ball", "Bola", 150], ["superball", "Superbola", 400], ["antidoto", "Cura Total", 80]];
 /** Tienda por guion: elige un objeto, comprueba el dinero (variable `money`) y lo entrega. */
 function shopScript(): string {
-  const head = `say (Tendero) ¡Bienvenido! Llevas {money} monedas.\nchoice ${PRICES.map(([, n, c]) => `${n} (${c})`).join(" | ")} | Salir\n`;
-  const body = PRICES.map(([id, n, cost], i) => `if choice == ${i}\nif money >= ${cost}\nadd money -${cost}\ngive ${id} 1\nsay (Tendero) ¡Gracias por tu compra de ${n}!\nelse\nsay (Tendero) No tienes suficientes monedas.\nend\nend`).join("\n");
+  const head = `say ¡Bienvenido! Llevas {money} monedas.\nchoice ${PRICES.map(([, n, c]) => `${n} (${c})`).join(" | ")} | Salir\n`;
+  const body = PRICES.map(([id, n, cost], i) => `if choice == ${i}\nif money >= ${cost}\nadd money -${cost}\ngive ${id} 1\nsay ¡Gracias por tu compra de ${n}!\nelse\nsay No tienes suficientes monedas.\nend\nend`).join("\n");
   return head + body;
 }
 const centro = (id: string, name: string, back: [string, number, number]): GameMap =>
@@ -184,7 +184,7 @@ function gym(id: string, name: string, back: [string, number, number], leader: N
 function leader(id: string, name: string, look: number, team: TeamMember[], medal: number, medalName: string, quote: string, win: string): Npc {
   return {
     id, x: 7, y: 2, look, dir: 0, kind: "trainer", name, lines: [quote], team, defeatedLines: [win],
-    winScript: `flag medalla${medal}\nadd medallas 1\nadd money ${300 * medal + 500}\ngive superpotion 2\nsay (${name}) Toma la ${medalName}. Con ella, tus criaturas te respetarán más.\nsay Llevas {medallas} medalla(s).`,
+    winScript: `flag medalla${medal}\nadd medallas 1\nadd money ${300 * medal + 500}\ngive superpotion 2\nsay Toma la ${medalName}. Con ella, tus criaturas te respetarán más.\nsay Llevas {medallas} medalla(s).`,
   };
 }
 
@@ -219,12 +219,12 @@ const lab = (): GameMap => room("lab", "Laboratorio del Prof. Cedro", 12, 9, 6, 
     npc("cedro", 6, 2, 2, 0, "Prof. Cedro", [], {
       kind: "script",
       script: [
-        "if starter", "say (Prof. Cedro) ¡Cuida de tu compañero! Los gimnasios del archipiélago te esperan al este.", "return", "end",
-        "say (Prof. Cedro) ¡Bienvenido al archipiélago de la Marea! Antes de salir, elige a tu primer compañero.",
+        "if starter", "say ¡Cuida de tu compañero! Los gimnasios del archipiélago te esperan al este.", "return", "end",
+        "say ¡Bienvenido al archipiélago de la Marea! Antes de salir, elige a tu primer compañero.",
         "choice Brasito (Fuego) | Hojito (Planta) | Gotín (Agua)",
         "if choice == 0", "givemon brasito 5", "end", "if choice == 1", "givemon hojito 5", "end", "if choice == 2", "givemon gotin 5", "end",
         "give ball 5", "give potion 3", "flag starter",
-        "say (Prof. Cedro) ¡Gran elección! Toma también unas bolas y pociones.", "say (Prof. Cedro) Consigue las cuatro medallas y desafía la Liga. ¡Buen viaje!",
+        "say ¡Gran elección! Toma también unas bolas y pociones.", "say Consigue las cuatro medallas y desafía la Liga. ¡Buen viaje!",
       ].join("\n"),
     }),
     npc("ayudante", 2, 5, 1, 3, "Ayudante", ["Las criaturas evolucionan al subir de nivel.", "Y los objetos equipables dan ventajas en combate: ¡pruébalos!"]),
@@ -309,9 +309,9 @@ function cueva(): GameMap {
     warps: [warp(8, 13, "ruta2", 15, 5)],
     encounters: ["piedrin", "terron", "murcio", "caracolin"], encounterLevel: [9, 13],
     npcs: [
-      npc("cofre", 8, 2, 0, 0, "Cofre", [], { kind: "script", script: "if cofre\nsay (Cofre) Está vacío.\nreturn\nend\nflag cofre\ngive superpotion 2\ngive antidoto 2\nsay (Cofre) ¡Encuentras 2 Superpociones y 2 Cura Total!" }),
+      npc("cofre", 8, 2, 0, 0, "Cofre", [], { kind: "script", script: "if cofre\nsay Está vacío.\nreturn\nend\nflag cofre\ngive superpotion 2\ngive antidoto 2\nsay ¡Encuentras 2 Superpociones y 2 Cura Total!" }),
       trainer("elias", 6, 6, 2, 3, "Científico Elías", "¡Estudio los ecos de esta cueva!", [mon("piedrin", 12), mon("murcio", 12)]),
-      npc("elias2", 10, 6, 2, 2, "Ayudante de Elías", [], { kind: "script", script: "if carbon_ok\nsay (Ayudante) ¡Que te sea útil ese carbón!\nreturn\nend\nflag carbon_ok\ngive carbon 1\nsay (Ayudante) Encontré este Carbón; potencia los ataques de Fuego.\nsay Equípalo con una criatura del equipo con el comando del juego o desde un guion." }),
+      npc("elias2", 10, 6, 2, 2, "Ayudante de Elías", [], { kind: "script", script: "if carbon_ok\nsay ¡Que te sea útil ese carbón!\nreturn\nend\nflag carbon_ok\ngive carbon 1\nsay Encontré este Carbón; potencia los ataques de Fuego.\nsay Equípalo con una criatura del equipo con el comando del juego o desde un guion." }),
     ],
   });
 }
@@ -430,7 +430,7 @@ function liga(): GameMap {
   g.set(7, 15, 8);
   g.rect(7, 14, 7, 14, 10);
   const elite = (id: string, y: number, name: string, look: number, team: TeamMember[], quote: string, win: string): Npc =>
-    ({ ...trainer(id, 7, y, look, 0, name, quote, team), defeatedLines: [win], winScript: `add money ${50 * team[0].level}\nsay (${name}) Sigue adelante: el Campeón te espera.` });
+    ({ ...trainer(id, 7, y, look, 0, name, quote, team), defeatedLines: [win], winScript: `add money ${50 * team[0].level}\nsay Sigue adelante: el Campeón te espera.` });
   return build("liga", "Liga del Archipiélago", g, {
     warps: [warp(7, 15, "marea", 22, 7)],
     npcs: [
@@ -441,7 +441,7 @@ function liga(): GameMap {
         ...trainer("aldo", 7, 1, 1, 0, "Campeón Aldo", "Has llegado muy lejos. Yo soy Aldo, el Campeón del Archipiélago. ¡Demuéstrame de qué estás hecho!",
           [mon("selvatico", 46), mon("voltaico", 45), mon("tsunamo", 46), mon("infernal", 47), mon("dunon", 45), mon("gaviotin", 45, "banda")]),
         defeatedLines: ["¡Increíble! Eres el nuevo Campeón."],
-        winScript: "flag campeon\nsay (Campeón Aldo) ¡El archipiélago tiene un nuevo Campeón!\nsay ★ FIN DE LA AVENTURA ★\nsay Gracias por jugar. Puedes seguir explorando, capturar más criaturas o crear tu propio mundo en el editor.",
+        winScript: "flag campeon\nsay ¡El archipiélago tiene un nuevo Campeón!\nsay ★ FIN DE LA AVENTURA ★\nsay Gracias por jugar. Puedes seguir explorando, capturar más criaturas o crear tu propio mundo en el editor.",
       },
     ],
   });

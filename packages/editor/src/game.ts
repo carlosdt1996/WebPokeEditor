@@ -105,7 +105,7 @@ export class Game {
     const r = parseScript(t.script);
     if (!r.ok) { this.host.say(`Disparador "${t.name}" con errores: ${r.errors[0]}`); return; }
     this.refreshBuiltins();
-    try { await runScript(r.code, this.scriptCtx(null, t.name), this.e); }
+    try { await runScript(r.code, this.scriptCtx(null, null), this.e); }
     catch (err) { this.host.say((err as Error).message); }
   }
 

@@ -703,9 +703,10 @@ await test("región «Archipiélago de la Marea»: plantilla, compañero inicial
   await W(page, () => { const g = window.__wpe.view.game; g.party[0].level = 40; g.party[0].hp = 999; void g.warpTo("gym-coral", 7, 4); });
   await page.waitForTimeout(300);
   await holdUntil(page, "ArrowUp", cell(7, 3));
-  await key(page, "Enter", 80);
-  await page.waitForSelector(".dialog:not([hidden])");
-  await closeDialog(page);
+  // la líder ve al jugador en cuanto llega al pasillo y lanza el desafío ella sola (diálogo y luego combate)
+  await page.waitForSelector(".dialog:not([hidden]), .battle", { timeout: 8000 });
+  assert((await page.locator(".dialog:not([hidden])").count()) > 0 || (await page.locator(".battle").count()) > 0, "desafío de Fresia");
+  if (await page.locator(".dialog:not([hidden])").count()) await closeDialog(page);
   await page.waitForSelector(".battle", { timeout: 8000 });
   for (let i = 0; i < 80 && (await page.locator(".battle").count()); i++) {
     const fight = page.locator(".menu button:has-text('Luchar')");
