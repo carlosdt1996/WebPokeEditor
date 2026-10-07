@@ -8,11 +8,11 @@ Creador de **fangames de Pokémon** que corre íntegramente en el navegador, usa
 
 ## Qué hay ya
 - **Editor de mapas** con varios mapas por proyecto y **tres capas** (suelo, objetos con transparencia y colisión propia, y alturas para el 3D): pintar, rellenar, cuentagotas, elevar/bajar, deshacer/rehacer, zoom/pan, redimensionar. **Tiles animados** (agua, hierba alta).
-- **NPCs** (conversación, entrenadores con equipo propio, curanderos y **scripts de eventos** ejecutados por una **VM en Rust/WASM**: mensajes, objetos, marcas persistentes, condicionales, combates, warps) y **saltos entre mapas** (puertas, rutas) con inspector.
+- **NPCs** (conversación, entrenadores con equipo propio, curanderos y **scripts de eventos** ejecutados por una **VM en Rust/WASM** (mensajes con `{variables}`, objetos, marcas y variables numéricas persistentes, condicionales, bucles, combates, warps) y **disparadores por casilla**) y **saltos entre mapas** (puertas, rutas) con inspector.
 - **Modo Probar**: caminas por el mundo, hablas con NPCs, te ven los entrenadores, hay encuentros en hierba alta y combates por turnos jugables, **1v1 y 2v2** (movimientos, tipos, STAB, críticos, objetos configurables, cambio, huida, captura, experiencia, subida de nivel, movimientos por nivel y evoluciones).
 - **Modo 3D** (🧊, estilo DS "Diamante/Perla"): terreno con alturas editables, edificios, objetos, agua animada, árboles y personajes como billboards, cámara inclinada que sigue al jugador y se puede girar (Q/E) y orbitar con el ratón. Requiere WebGPU.
 - **Render WebGPU** (2D instanciado + 3D con depth buffer) con **fallback Canvas 2D** para el modo 2D.
-- **Núcleo Rust → WASM** determinista: movimiento en grid, colisiones, bloqueadores, encuentros, RNG y fórmula de daño.
+- **Núcleo Rust → WASM** determinista: movimiento en grid, colisiones, capas, encuentros, RNG, **simulación de combate 1v1/2v2** y **VM de scripts**.
 - **Editor de datos**: especies, movimientos, **objetos e inventario**, equipo inicial, encuentros por mapa; **importar/exportar CSV** de especies y movimientos.
 - **Gráficos**: criaturas y arte originales generados por código. Puedes **importar tus propios sprites y tileset** (se quedan en tu navegador/proyecto; ver [aspectos legales](docs/guides/legal-and-assets.md)).
 - **Exportar juego**: un único `.html` autocontenido (motor WASM + datos + player) que se juega sin servidor.

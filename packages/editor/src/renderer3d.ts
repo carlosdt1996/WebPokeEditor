@@ -64,10 +64,14 @@ const SKY: [number, number, number] = [0.55, 0.76, 0.95];
 class MeshBuilder {
   v: number[] = [];
   /** Quad con 4 esquinas en orden CCW visto desde el frente. */
-  quad(p: number[][], idx: number, shade: number, alt?: number) {
+  quad(p: number[][], idx: number, shade: number, alt?: number, sub?: [number, number, number, number]) {
     const e = 0.02 / 16, cw = 1 / ATLAS_COLS, ch = 1 / ATLAS_ROWS;
-    const u0 = (idx % ATLAS_COLS) * cw + e * cw * 16 / 16, v0 = Math.floor(idx / ATLAS_COLS) * ch;
-    const u1 = u0 + cw - 2 * e * cw * 16 / 16, v1 = v0 + ch;
+    let u0 = (idx % ATLAS_COLS) * cw + e * cw * 16 / 16, v0 = Math.floor(idx / ATLAS_COLS) * ch;
+    let u1 = u0 + cw - 2 * e * cw * 16 / 16, v1 = v0 + ch;
+    if (sub) { // sub-rectángulo en fracciones de la celda: [x0, y0, x1, y1]
+      const bu = (idx % ATLAS_COLS) * cw;
+      u0 = bu + sub[0] * cw; u1 = bu + sub[2] * cw; v1 = v0 + sub[3] * ch; v0 = v0 + sub[1] * ch;
+    }
     const uv = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]];
     const du = alt === undefined ? 0 : (alt % ATLAS_COLS) * cw - (idx % ATLAS_COLS) * cw;
     const dv = alt === undefined ? 0 : Math.floor(alt / ATLAS_COLS) * ch - Math.floor(idx / ATLAS_COLS) * ch;
@@ -186,7 +190,18 @@ export class Renderer3D {
       if (obj) {
         const o: Record<number, [number, number]> = { 12: [1.9, BB_TREE], 13: [0.9, BB_TUFT], 14: [0.8, BB_FLOWER], 15: [0.95, BB_ROCK], 16: [1.0, BB_FENCE], 17: [0.95, BB_SIGN] };
         const [size, idx] = o[obj] ?? [0.9, BB_TUFT];
-        cross(x + 0.5, y + 0.5, size, idx, top);
+        if (obj === 15) {
+          // roca: caja baja con la parte opaca del sprite como textura
+          const c = x + 0.5, z = y + 0.5, r = 0.38, hh = 0.5, grey: [number, number, number, number] = [6 / 16, 9 / 16, 10 / 16, 13 / 16];
+          m.quad([[c - r, top + hh, z + r], [c + r, top + hh, z + r], [c + r, top + hh, z - r], [c - r, top + hh, z - r]], BB_ROCK, 1.05, undefined, grey);
+          const faces: [number[][], number][] = [
+            [[[c - r, top, z + r], [c + r, top, z + r], [c + r, top + hh, z + r], [c - r, top + hh, z + r]], 0.9],
+            [[[c + r, top, z - r], [c - r, top, z - r], [c - r, top + hh, z - r], [c + r, top + hh, z - r]], 0.78],
+            [[[c - r, top, z - r], [c - r, top, z + r], [c - r, top + hh, z + r], [c - r, top + hh, z - r]], 0.66],
+            [[[c + r, top, z + r], [c + r, top, z - r], [c + r, top + hh, z - r], [c + r, top + hh, z + r]], 0.74],
+          ];
+          for (const [q, sh] of faces) m.quad(q, BB_ROCK, sh, undefined, grey);
+        } else cross(x + 0.5, y + 0.5, size, idx, top);
       } else if (t === 4) cross(x + 0.5, y + 0.5, 1.9, BB_TREE, top);
       else if (t === 1) for (let k = 0; k < 3; k++) cross(x + 0.2 + rnd() * 0.6, y + 0.2 + rnd() * 0.6, 0.55, BB_TUFT, top);
       else if (t === 6) for (let k = 0; k < 2; k++) cross(x + 0.2 + rnd() * 0.6, y + 0.2 + rnd() * 0.6, 0.4, BB_FLOWER, top);

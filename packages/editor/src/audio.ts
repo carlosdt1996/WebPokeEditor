@@ -2,6 +2,9 @@
 
 type Sfx = "step" | "bump" | "select" | "encounter" | "hit" | "super" | "weak" | "faint" | "levelup" | "catch" | "heal" | "miss" | "warp" | "talk";
 
+/** Contadores para diagnóstico/pruebas: cuántas notas se han programado y estado del contexto de audio. */
+export const audioStats = { tones: 0, state: () => ctx?.state ?? "none" };
+
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let muted = false;
@@ -24,6 +27,7 @@ function ac() {
 function tone(freq: number, dur: number, type: OscillatorType = "square", when = 0, slideTo?: number, vol = 1) {
   const c = ac();
   if (!c || !master) return;
+  audioStats.tones++;
   const t = c.currentTime + when;
   const o = c.createOscillator(), g = c.createGain();
   o.type = type;

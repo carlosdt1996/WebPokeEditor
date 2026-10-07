@@ -6,6 +6,8 @@
 
 use core::cell::UnsafeCell;
 
+pub mod battle;
+
 pub const MAX_DIM: usize = 128;
 pub const MOVE_TICKS: u32 = 10;
 

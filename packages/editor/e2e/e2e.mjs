@@ -148,6 +148,25 @@ await test("crear salto y editar destino", async () => {
   assert(await W(page, () => window.__wpe.view.map.warps.every((k) => k.toMap !== "ruta1" || k.x !== undefined && window.__wpe.view.map.warps.length === 2)), "salto eliminado con Supr");
 });
 
+await test("herramienta ⚡ Disparador: crear, editar el script (bucles) y eliminar", async () => {
+  if (await page.locator("text=■ Detener").count()) await page.click("text=■ Detener");
+  await W(page, () => window.__wpe.view.switchMap(0));
+  await page.click("button:has-text('⚡ Disparador')");
+  const pos = await W(page, () => { const v = window.__wpe.view; const r = v.el.getBoundingClientRect(); return { x: r.left + (6.5 * 16 - v.cam.x) * v.cam.zoom, y: r.top + (8.5 * 16 - v.cam.y) * v.cam.zoom }; });
+  await page.mouse.click(pos.x, pos.y);
+  await page.waitForSelector(".inspector textarea.code");
+  await page.fill(".inspector textarea.code", "repeat 2\nadd n 1\nsay vuelta {n}\nend\nwhile n < 4\nadd n 1\nend\nif n >= 4\nbreak\nend");
+  assert((await page.textContent(".errs")).includes("break fuera"), "debe avisar de break fuera de bucle: " + (await page.textContent(".errs")));
+  await page.fill(".inspector textarea.code", "repeat 2\nadd n 1\nsay vuelta {n}\nend\nwhile n < 4\nadd n 1\nend");
+  assert((await page.textContent(".errs")).includes("válido"), "script válido");
+  eq(await W(page, () => window.__wpe.view.map.triggers.at(-1).script.includes("while")), true, "script guardado");
+  await page.keyboard.press("Delete"); // con el foco en el script no debe borrar el disparador
+  eq(await W(page, () => window.__wpe.view.map.triggers.length), 2, "Supr dentro del editor no borra");
+  await page.click("button:has-text('🗑 Eliminar')");
+  eq(await W(page, () => window.__wpe.view.map.triggers.length), 1, "disparador eliminado (queda el del cartel)");
+  await page.click("button:has-text('✏️ Pintar')");
+});
+
 await test("gestión de mapas: nuevo, renombrar y eliminar", async () => {
   page.removeAllListeners("dialog");
   page.on("dialog", (d) => d.type() === "prompt" ? d.accept("Cueva") : d.accept());
@@ -186,6 +205,30 @@ await test("NPC con script: da objetos una sola vez", async () => {
   assert((await page.textContent(".dialog")).includes("Ya tienes"), "segunda vez: ya recibido");
   await closeDialog(page);
   eq(await W(page, () => window.__wpe.view.game.inv.potion), inv1.potion, "sin duplicar");
+});
+
+await test("audio: el motor de sonido programa notas y el contexto está activo", async () => {
+  const a = await W(page, () => ({ tones: window.__wpe.audio.tones, state: window.__wpe.audio.state() }));
+  assert(a.tones > 0, "no se programó ninguna nota (música/pasos): " + JSON.stringify(a));
+  eq(a.state, "running", "contexto de audio (nota: no se puede comprobar cómo suena)");
+  const before = a.tones;
+  await holdUntil(page, "ArrowDown", cell(8, 9));
+  assert((await W(page, () => window.__wpe.audio.tones)) > before, "los pasos/música siguen generando notas");
+});
+
+await test("disparador por casilla: contador de visitas con variables y {interpolación}", async () => {
+  await W(page, () => window.__wpe.view.game.warpTo("pueblo", 11, 10));
+  await page.waitForTimeout(200);
+  await holdUntil(page, "ArrowDown", cell(11, 12));
+  await page.waitForSelector(".dialog:not([hidden])");
+  assert((await page.textContent(".dialog")).includes("Bienvenido"), "primera visita: " + (await page.textContent(".dialog")));
+  await closeDialog(page);
+  await holdUntil(page, "ArrowDown", cell(11, 13));
+  await holdUntil(page, "ArrowUp", cell(11, 12));
+  await page.waitForSelector(".dialog:not([hidden])");
+  assert((await page.textContent(".dialog")).includes("2 veces"), "segunda visita: " + (await page.textContent(".dialog")));
+  eq(await W(page, () => window.__wpe.engine.getVar("visitas")), 2, "variable en la VM de Rust");
+  await closeDialog(page);
 });
 
 await test("NPC de conversación y curandero", async () => {
@@ -388,6 +431,9 @@ await test("PWA: manifest, service worker y funcionamiento sin conexión", async
   await page.reload(); await page.waitForSelector(".viewport canvas", { timeout: 8000 }); await page.waitForTimeout(500);
   assert((await page.textContent("footer")).includes("Motor"), "la app carga sin red");
   await page.context().setOffline(false);
+  const cdp = await page.context().newCDPSession(page);
+  const inst = await cdp.send("Page.getInstallabilityErrors");
+  assert(inst.installabilityErrors.length === 0, "la PWA no es instalable: " + JSON.stringify(inst.installabilityErrors));
 });
 
 await test("modo 3D en edición y en juego (WebGPU), girando la cámara", async () => {

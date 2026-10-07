@@ -23,4 +23,10 @@ Niveles: aleatoria → heurística de daño → reglas por trainer (scripteable)
 Tests contra casos conocidos de cálculo de daño y *replays*.
 
 ## Implementación actual
-`packages/editor/src/battle.ts` (TypeScript) simula combates **1v1 y 2v2**; usa del núcleo WASM el RNG determinista (`engine.rand`) y la fórmula de daño (`engine.damage`), por lo que es reproducible por semilla y está cubierta por tests. Un entrenador con `double: true` activa el modo doble si ambos lados tienen 2+ criaturas en pie. Orden por prioridad (cambios/objetos antes que ataques) y velocidad; el rival elige movimiento y objetivo con el RNG. Objetos curativos y de captura se definen como datos (`items`). Mover el bucle de turnos a un crate `battle` en Rust sigue pendiente: hoy solo la fórmula de daño y el RNG viven en Rust.
+La simulación está en **Rust** (`crates/engine-core/src/battle.rs`), con soporte 1v1 y 2v2:
+- **Datos**: el host carga las tablas (tipos con su tabla de efectividad ×100, movimientos, especies con stats, evolución y learnset) y los equipos en un búfer de enteros compartido (`bt_io_ptr`), y llama a `bt_start`.
+- **Turno**: el host fija una acción por casilla (`bt_set_action`: mover+objetivo, cambiar, curar, bola, huir) y llama a `bt_turn`. Rust ordena (cambios/objetos antes que ataques; luego velocidad; desempate con el RNG), ejecuta, reparte experiencia, sube de nivel, aprende movimientos y evoluciona.
+- **Salida**: una lista de eventos numéricos (`E_USE`, `E_HIT`, `E_FAINT`, `E_EXP`…), cada uno con una instantánea de los PS en pantalla. `packages/editor/src/battle.ts` los traduce a texto en español y refleja el estado final en los objetos `Mon` de JS.
+- Comparte el RNG determinista con el mundo: misma semilla + mismas acciones = mismo combate.
+- Límites: 16 tipos, 256 movimientos, 128 especies, 8 movimientos por nivel por especie (el proyecto lo valida).
+Un entrenador con `double: true` activa el modo doble si ambos lados tienen 2+ criaturas en pie. Pendiente: habilidades, estados alterados, efectos de movimientos por datos.

@@ -20,6 +20,7 @@ Que un creador sin programar pueda hacer cinemáticas, tiendas, puzles, misiones
 Plugins en WASM (sandbox) o JS limitado para añadir comandos. Ver ADR-0005 (pendiente).
 
 ## Implementación actual
-- **Parser/compilador** (`packages/editor/src/script.ts`, TypeScript): lenguaje de líneas (`say`, `give <objeto>`, `heal`, `flag/unflag`, `if/ifnot/else/end`, `battle`, `givemon`, `warp`) → bytecode de 4 palabras por instrucción + tabla de cadenas. Valida sintaxis y, desde `project.ts`, las referencias (especies, mapas, objetos).
-- **VM** (`crates/engine-core`, Rust): ejecuta el control de flujo (saltos, condicionales) y guarda las **marcas** (256) en memoria WASM; *cede* (yield) en cada operación con efecto (`say`, `give`, `heal`, `battle`, `givemon`, `warp`) y el host (`game.ts`) la resuelve de forma asíncrona antes de reanudarla. Un límite de pasos protege de bucles. Ver [ADR-0007](../adr/0007-script-vm-en-rust.md).
-- Pendiente: triggers por casilla, variables numéricas y bucles.
+- **Parser/compilador** (`packages/editor/src/script.ts`, TypeScript): lenguaje de líneas con `say` (con `{variable}`), `give <objeto>`, `heal`, `flag/unflag`, `set/add` (variables enteras), `if/ifnot/else/end` por marca o comparación (`== != > < >= <=`), `while`, `repeat n`, `break`, `battle`, `givemon` y `warp`. Compila a bytecode de 4 palabras por instrucción + tabla de cadenas. Valida sintaxis y, desde `project.ts`, las referencias (especies, mapas, objetos).
+- **VM** (`crates/engine-core`, Rust): ejecuta saltos y comparaciones y guarda **256 marcas y 256 variables** en memoria WASM; *cede* (yield) en cada operación con efecto y el host (`game.ts`) la resuelve de forma asíncrona antes de reanudarla. Un límite de pasos y otro de acciones protegen de bucles infinitos. Ver [ADR-0007](../adr/0007-script-vm-en-rust.md).
+- **Disparadores por casilla** (`GameMap.triggers`): ejecutan un script al pisar la casilla (opcionalmente solo la primera vez). Variables predefinidas al empezar cada script: `steps`, `party`, `level`.
+- Pendiente: strings/arrays, funciones y eventos por entrada de mapa.

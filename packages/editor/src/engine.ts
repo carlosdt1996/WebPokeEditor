@@ -31,6 +31,16 @@ interface Exports {
   vm_flags_reset(): void;
   vm_var_get(id: number): number;
   vm_var_set(id: number, v: number): void;
+  bt_io_ptr(): number;
+  bt_events_ptr(): number;
+  bt_load_data(): void;
+  bt_load_team(side: number, n: number): void;
+  bt_read_team(side: number): void;
+  bt_start(trainer: number, double: number): number;
+  bt_state(): void;
+  bt_set_action(slot: number, kind: number, a: number, b: number): void;
+  bt_turn(): number;
+  bt_force_switch(slot: number, to: number): number;
   engine_clear_blockers(): void;
   engine_set_blocker(x: number, y: number, v: number): void;
   engine_walkable(x: number, y: number): number;
@@ -65,6 +75,21 @@ export class Engine {
   get objects(): Uint8Array {
     return new Uint8Array(this.x.memory.buffer, this.x.engine_objects_ptr(), this.width * this.height);
   }
+
+  // ----- Combate (Rust): búfer de enteros compartido -----
+  static readonly BT_IO = 8192;
+  static readonly EV_STRIDE = 13;
+  /** Búfer de entrada/salida del combate (vista directa; no la guardes entre llamadas). */
+  get btIo(): Int32Array { return new Int32Array(this.x.memory.buffer, this.x.bt_io_ptr(), Engine.BT_IO); }
+  btEvents(n: number): Int32Array { return new Int32Array(this.x.memory.buffer, this.x.bt_events_ptr(), n * Engine.EV_STRIDE); }
+  btLoadData() { this.x.bt_load_data(); }
+  btLoadTeam(side: number, n: number) { this.x.bt_load_team(side, n); }
+  btReadTeam(side: number) { this.x.bt_read_team(side); }
+  btStart(trainer: boolean, double: boolean) { return this.x.bt_start(trainer ? 1 : 0, double ? 1 : 0); }
+  btState() { this.x.bt_state(); }
+  btSetAction(slot: number, kind: number, a: number, b: number) { this.x.bt_set_action(slot, kind, a, b); }
+  btTurn() { return this.x.bt_turn(); }
+  btForceSwitch(slot: number, to: number) { return this.x.bt_force_switch(slot, to); }
 
   // ----- VM de scripts (Rust) -----
   private flagIds = new Map<string, number>();

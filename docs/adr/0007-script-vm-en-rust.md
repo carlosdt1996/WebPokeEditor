@@ -13,4 +13,4 @@ Compilador en TS (necesita tablas de cadenas y los ids de marca) → bytecode nu
 Intérprete TS con callbacks (la versión anterior); VM con async en el lado Rust (no encaja con wasm32 sin runtime).
 
 ## Consecuencias
-+ Las marcas viven en el estado del motor y las reglas de ejecución son las mismas en cualquier host; + testeable en Rust y TS. − Límite de 1024 instrucciones y 256 marcas por ahora.
++ Las marcas y variables viven en el estado del motor y las reglas de ejecución son las mismas en cualquier host; + testeable en Rust y TS. − Límite de 1024 instrucciones, 256 marcas y 256 variables por ahora. Actualización: se añadieron variables enteras, comparaciones y bucles (`CMP`/`JNC`/`SET`/`ADD`); los saltos relativos a instrucciones TS se remapean al compilar (una comparación ocupa dos instrucciones de bytecode).

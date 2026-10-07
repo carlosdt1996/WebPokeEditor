@@ -2,6 +2,8 @@
 import { parseScript } from "./script";
 
 export const SCHEMA_VERSION = 3;
+/** Límites de las tablas del motor de combate (crates/engine-core/src/battle.rs). */
+export const LIMITS = { types: 16, moves: 256, species: 128, learn: 8 } as const;
 
 export interface Stats { hp: number; atk: number; def: number; spa: number; spd: number; spe: number }
 export const STAT_KEYS: (keyof Stats)[] = ["hp", "atk", "def", "spa", "spd", "spe"];
@@ -248,6 +250,10 @@ export function validate(p: Project): string[] {
   if (itemIds.size !== p.items.length) errs.push("Ids de objeto duplicados");
   for (const k of Object.keys(p.inventory)) if (!itemIds.has(k)) errs.push(`Inventario: objeto inexistente "${k}"`);
   if (!p.maps.length) errs.push("El proyecto no tiene mapas");
+  if (p.species.length > LIMITS.species) errs.push(`Demasiadas especies (máximo ${LIMITS.species})`);
+  if (p.moves.length > LIMITS.moves) errs.push(`Demasiados movimientos (máximo ${LIMITS.moves})`);
+  if (p.types.length > LIMITS.types) errs.push(`Demasiados tipos (máximo ${LIMITS.types})`);
+  for (const sp of p.species) if ((sp.learnset?.length ?? 0) > LIMITS.learn) errs.push(`${sp.name}: máximo ${LIMITS.learn} movimientos por nivel`);
   if (mapIds.size !== p.maps.length) errs.push("Ids de mapa duplicados");
   if (speciesIds.size !== p.species.length) errs.push("Ids de especie duplicados");
   if (moveIds.size !== p.moves.length) errs.push("Ids de movimiento duplicados");

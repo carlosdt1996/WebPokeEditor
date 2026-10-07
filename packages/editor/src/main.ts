@@ -1,5 +1,5 @@
 import "./style.css";
-import { isMuted, setMuted } from "./audio";
+import { audioStats, isMuted, setMuted } from "./audio";
 import { h } from "./dom";
 import { Engine } from "./engine";
 import { MapView, type Selection, type Tool } from "./mapView";
@@ -301,7 +301,7 @@ async function main() {
   status.textContent = "Listo";
   if (import.meta.env.PROD && "serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
   say("Bienvenido. Pinta el mapa, coloca NPC y saltos, y pulsa ▶ Probar. Prueba también 🧊 3D.");
-  void ((window as unknown as Record<string, unknown>).__wpe = { engine, view, get project() { return project; } });
+  void ((window as unknown as Record<string, unknown>).__wpe = { engine, view, audio: audioStats, get project() { return project; } });
 }
 
 main().catch((e) => {
