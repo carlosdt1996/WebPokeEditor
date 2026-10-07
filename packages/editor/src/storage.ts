@@ -34,7 +34,7 @@ export async function loadProject(): Promise<Project | null> {
     const root = await opfsRoot();
     if (root) {
       const f = await (await root.getFileHandle(FILE)).getFile();
-      fromOpfs = { p: parseProject(await f.text()), t: f.lastModified };
+      fromOpfs = { p: parseProject(await f.text(), false), t: f.lastModified };
     }
   } catch { /* no hay archivo todavía o está corrupto */ }
   const local = loadLocal();

@@ -70,9 +70,10 @@ td input[type=text] { width: 100%; min-width: 90px; }
 .viewport canvas.gl3d { image-rendering: auto; }
 .thumb { width: 40px; height: 40px; image-rendering: pixelated; vertical-align: middle; background: #11131b; border-radius: 6px; }
 td.spr { white-space: nowrap; } td.spr button { padding: 2px 6px; margin-left: 2px; }
-.inspector { display: grid; gap: 6px; }
+.inspector, .enterbox { display: grid; gap: 6px; }
 .field { display: grid; gap: 2px; font-size: 12px; } .field > span { color: var(--muted); }
 .field input[type=text], .field select, .field textarea { width: 100%; }
+.enterbox .field textarea { min-height: 60px; }
 .field textarea { background: #11131b; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font: inherit; color: inherit; resize: vertical; }
 .inspector .n { width: 56px; margin-right: 4px; }
 .dialog .who { display: block; font-size: 13px; color: #c62828; margin-bottom: 2px; }

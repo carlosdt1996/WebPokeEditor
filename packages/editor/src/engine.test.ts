@@ -276,6 +276,20 @@ describe("scripts: variables, bucles y disparadores", () => {
   });
 });
 
+describe("carga del proyecto guardado", () => {
+  it("un script con errores no hace perder el proyecto al cargar (solo la importación es estricta)", () => {
+    const p = defaultProject();
+    p.maps[0].npcs.find((n) => n.kind === "script")!.script = "say hola\nvolar 3";
+    p.maps[0].onEnter = "break";
+    const json = JSON.stringify(p);
+    expect(() => parseProject(json)).toThrow(/Proyecto inválido/);
+    const lenient = parseProject(json, false);
+    expect(lenient.name).toBe(p.name);
+    expect(validate(lenient).length).toBeGreaterThan(0);
+    expect(() => parseProject("{\"schemaVersion\":4,\"maps\":[]}", false)).toThrow(/faltan/);
+  });
+});
+
 describe("capa de objetos y colisiones", () => {
   it("los objetos sólidos bloquean y los decorativos no", async () => {
     const e = await Engine.load(wasm());

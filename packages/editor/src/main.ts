@@ -204,7 +204,7 @@ async function main() {
   renderInspector(null);
 
   // ---------- Script "al entrar al mapa" ----------
-  const enterBox = h("div", { class: "inspector" });
+  const enterBox = h("div", { class: "enterbox" });
   const renderEnter = () => {
     enterBox.replaceChildren(...scriptEditor(() => view.map.onEnter ?? "", (v) => { view.map.onEnter = v.trim() ? v : undefined; }));
   };
@@ -307,6 +307,7 @@ async function main() {
   buildPalette(); selectTile(1); setTool("paint"); show("map"); sync();
   status.textContent = "Listo";
   if (import.meta.env.PROD && "serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+  { const warn = validate(project); if (warn.length) say(`⚠ El proyecto guardado tiene ${warn.length} aviso(s); revisa: ${warn[0]}`); }
   say("Bienvenido. Pinta el mapa, coloca NPC y saltos, y pulsa ▶ Probar. Prueba también 🧊 3D.");
   void ((window as unknown as Record<string, unknown>).__wpe = { engine, view, audio: audioStats, get project() { return project; } });
 }

@@ -128,9 +128,9 @@ await test("crear NPC, editar en el inspector y pasar a script con validación",
   await page.selectOption(".inspector select >> nth=0", "script");
   await page.waitForSelector(".inspector textarea.code");
   await page.fill(".inspector textarea.code", "say Hola\nvolar 3");
-  assert((await page.textContent(".errs")).includes("línea 2"), "debería señalar el error de la línea 2");
+  assert((await page.textContent(".inspector .errs")).includes("línea 2"), "debería señalar el error de la línea 2");
   await page.fill(".inspector textarea.code", "say Hola\ngive potion 1\nflag visto");
-  assert((await page.textContent(".errs")).includes("válido"), "script válido");
+  assert((await page.textContent(".inspector .errs")).includes("válido"), "script válido");
   const n = await W(page, () => window.__wpe.view.map.npcs.at(-1));
   eq([n.name, n.kind], ["Guardia", "script"], "datos del NPC");
   await page.click("button:has-text('🗑 Eliminar')");
@@ -156,9 +156,9 @@ await test("herramienta ⚡ Disparador: crear, editar el script (bucles) y elimi
   await page.mouse.click(pos.x, pos.y);
   await page.waitForSelector(".inspector textarea.code");
   await page.fill(".inspector textarea.code", "repeat 2\nadd n 1\nsay vuelta {n}\nend\nwhile n < 4\nadd n 1\nend\nif n >= 4\nbreak\nend");
-  assert((await page.textContent(".errs")).includes("break fuera"), "debe avisar de break fuera de bucle: " + (await page.textContent(".errs")));
+  assert((await page.textContent(".inspector .errs")).includes("break fuera"), "debe avisar de break fuera de bucle: " + (await page.textContent(".inspector .errs")));
   await page.fill(".inspector textarea.code", "repeat 2\nadd n 1\nsay vuelta {n}\nend\nwhile n < 4\nadd n 1\nend");
-  assert((await page.textContent(".errs")).includes("válido"), "script válido");
+  assert((await page.textContent(".inspector .errs")).includes("válido"), "script válido");
   eq(await W(page, () => window.__wpe.view.map.triggers.at(-1).script.includes("while")), true, "script guardado");
   await page.keyboard.press("Delete"); // con el foco en el script no debe borrar el disparador
   eq(await W(page, () => window.__wpe.view.map.triggers.length), 2, "Supr dentro del editor no borra");
@@ -495,15 +495,15 @@ await test("editor: habilidades, efectos de movimientos y script al entrar al ma
   eq(await W(page, () => window.__wpe.project.abilities.length), n0 + 1, "habilidad añadida");
   await W(page, () => { window.__wpe.project.abilities.pop(); });
   await page.click("button:has-text('🗺️ Mapa')");
-  await W(page, () => window.__wpe.view.switchMap(1));
+  await page.selectOption(".side select.grow", "1");
   await page.waitForTimeout(200);
-  assert((await page.locator(".side textarea.code").first().inputValue()).includes("mama_saluda"), "el script de entrada de la casa se muestra");
-  await page.locator(".side textarea.code").first().fill("say hola");
+  assert((await page.locator(".enterbox textarea.code").inputValue()).includes("mama_saluda"), "el script de entrada de la casa se muestra");
+  await page.locator(".enterbox textarea.code").fill("say hola");
   eq(await W(page, () => window.__wpe.view.map.onEnter), "say hola", "se guarda en el mapa");
-  await page.locator(".side textarea.code").first().fill("");
+  await page.locator(".enterbox textarea.code").fill("");
   eq(await W(page, () => window.__wpe.view.map.onEnter), undefined, "vacío = sin script");
-  await page.locator(".side textarea.code").first().fill("if mama_saluda\nreturn\nend\nflag mama_saluda\nsay (Mamá) ¡Has vuelto a casa!");
-  await W(page, () => window.__wpe.view.switchMap(0));
+  await page.locator(".enterbox textarea.code").fill("if mama_saluda\nreturn\nend\nflag mama_saluda\nsay (Mamá) ¡Has vuelto a casa!");
+  await page.selectOption(".side select.grow", "0");
 });
 
 await test("modo 3D en edición y en juego (WebGPU), girando la cámara", async () => {
@@ -565,7 +565,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   const path = join(tmpdir(), "e2e-proyecto.wpe.json");
   await dl.saveAs(path);
   const json = JSON.parse(readFileSync(path, "utf8"));
-  eq([json.name, json.schemaVersion, json.maps.length, json.items.length], ["Proyecto E2E", 3, 3, 4], "contenido exportado");
+  eq([json.name, json.schemaVersion, json.maps.length, json.items.length], ["Proyecto E2E", 4, 3, 5], "contenido exportado");
   await page.click("button:has-text('Nuevo')");
   await page.waitForTimeout(400);
   eq(await W(page, () => window.__wpe.project.name), "Mi Fangame", "tras Nuevo");

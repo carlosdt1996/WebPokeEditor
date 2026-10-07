@@ -377,10 +377,15 @@ export function validate(p: Project): string[] {
   return errs;
 }
 
-export function parseProject(json: string): Project {
+/** Importación estricta: rechaza proyectos con referencias rotas. Con `strict = false` (carga del guardado local) solo exige la estructura básica, para no perder un proyecto por un aviso (p. ej. un script a medio escribir). */
+export function parseProject(json: string, strict = true): Project {
   const p = migrate(JSON.parse(json));
-  const errs = validate(p);
-  if (errs.length) throw new Error("Proyecto inválido:\n- " + errs.join("\n- "));
+  if (!Array.isArray(p.maps) || !p.maps.length || !Array.isArray(p.species) || !Array.isArray(p.moves)) throw new Error("Proyecto inválido: faltan mapas, especies o movimientos");
+  p.items ??= []; p.abilities ??= []; p.inventory ??= {}; p.party ??= [];
+  if (strict) {
+    const errs = validate(p);
+    if (errs.length) throw new Error("Proyecto inválido:\n- " + errs.join("\n- "));
+  }
   return p;
 }
 
@@ -406,6 +411,6 @@ export function saveLocal(p: Project): boolean {
 export function loadLocal(): Project | null {
   try {
     const s = localStorage.getItem(KEY) ?? localStorage.getItem("webpokeeditor.project.v2") ?? localStorage.getItem("webpokeeditor.project.v1");
-    return s ? parseProject(s) : null;
+    return s ? parseProject(s, false) : null;
   } catch { return null; }
 }

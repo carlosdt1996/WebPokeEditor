@@ -12,15 +12,15 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
   host.append(root);
 
   interface Side { img: HTMLImageElement; name: HTMLElement; lv: HTMLElement; fill: HTMLElement; num: HTMLElement; badge: HTMLElement; el: HTMLElement }
-  const mkSide = (cls: string, slot: number): Side => {
+  const mkSide = (cls: string, plate: string, slot: number): Side => {
     const img = h("img", { class: `mon ${cls} s${slot}` });
     const name = h("b"), lv = h("span"), fill = h("div", { class: "hp" }), num = h("small"), badge = h("em", { class: "badge" });
-    const el = h("div", { class: `plate ${cls}plate s${slot}` }, h("div", {}, name, lv, badge), h("div", { class: "hpbar" }, fill), num);
+    const el = h("div", { class: `plate ${plate} s${slot}` }, h("div", {}, name, lv, badge), h("div", { class: "hpbar" }, fill), num);
     root.append(img, el);
     return { img, name, lv, fill, num, badge, el };
   };
-  const fs = Array.from({ length: b.size }, (_, i) => mkSide("foe", i));
-  const ps = Array.from({ length: b.size }, (_, i) => mkSide("pl", i));
+  const fs = Array.from({ length: b.size }, (_, i) => mkSide("foe", "fplate", i));
+  const ps = Array.from({ length: b.size }, (_, i) => mkSide("pl", "pplate", i));
   const msg = h("div", { class: "msg" });
   const menu = h("div", { class: "menu" });
   root.append(msg, menu);
