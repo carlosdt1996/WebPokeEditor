@@ -427,11 +427,11 @@ await test("combate doble 2v2 contra los Hermanos Gil", async () => {
       await fight.click();
       await page.locator(".menu button").first().click();
       await page.waitForTimeout(80);
-      if ((await page.textContent(".msg"))?.includes("¿A quién atacas?")) await page.locator(".menu button").first().click();
+      if (((await page.locator(".msg").textContent({ timeout: 500 }).catch(() => "")) ?? "").includes("¿A quién atacas?")) await page.locator(".menu button").first().click();
     } else if (await page.locator(".menu button:has-text('¿A quién')").count()) { /* nada */ }
     else {
       const pick = page.locator(".menu button:enabled").first();
-      if ((await page.textContent(".msg"))?.includes("¿A quién envías?") && await pick.count()) await pick.click();
+      if (((await page.locator(".msg").textContent({ timeout: 500 }).catch(() => "")) ?? "").includes("¿A quién envías?") && await pick.count()) await pick.click();
     }
     await page.waitForTimeout(150);
     await page.locator(".battle").click({ position: { x: 20, y: 20 } }).catch(() => {});
@@ -576,7 +576,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   const p1 = join(tmpdir(), "e2e-v1.json"); writeFileSync(p1, JSON.stringify(v1));
   await page.locator("header input[type=file]").setInputFiles(p1);
   await page.waitForFunction(() => window.__wpe.project.name === "Antiguo");
-  eq(await W(page, () => [window.__wpe.project.schemaVersion, window.__wpe.project.maps[0].w]), [3, 6], "migración v1→v3");
+  eq(await W(page, () => [window.__wpe.project.schemaVersion, window.__wpe.project.maps[0].w]), [4, 6], "migración v1→v4");
   // JSON inválido → mensaje y el proyecto no cambia
   const bad = join(tmpdir(), "e2e-bad.json"); writeFileSync(bad, JSON.stringify({ ...v1, encounters: ["fantasma"] }));
   let msg = ""; page.removeAllListeners("dialog"); page.on("dialog", (d) => { msg = d.message(); d.accept(); });
