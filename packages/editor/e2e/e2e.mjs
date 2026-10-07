@@ -607,7 +607,7 @@ await test("importar sprite de especie y atlas propio (válido e inválido)", as
 
 await test("editor de datos: evolución, learnset, especie nueva y validación", async () => {
   const sp = await W(page, () => window.__wpe.project.species.find((s) => s.id === "flamito"));
-  eq([sp.evolve.into, sp.learnset[0].move], ["flamaron", "garra"], "datos por defecto");
+  eq([sp.evolve.into, sp.learnset.some((l) => l.move === "garra" && l.level === 8)], ["flamaron", true], "datos por defecto");
   await page.click("button:has-text('+ Añadir especie')");
   eq(await W(page, () => window.__wpe.project.species.at(-1).id), "nueva", "especie añadida");
   await page.locator("tbody tr").nth(await W(page, () => window.__wpe.project.species.length - 1)).locator("button.danger").click();
