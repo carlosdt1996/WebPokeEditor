@@ -16,7 +16,7 @@ pub const MAX_EVENTS: usize = 256;
 pub const EV_STRIDE: usize = 17; // kind + 4 args + 8 (índice y PS por casilla) + 4 (estado por casilla)
 pub const SP_STRIDE: usize = 28;
 pub const MON_STRIDE: usize = 11;
-pub const MV_STRIDE: usize = 21;
+pub const MV_STRIDE: usize = 25;
 pub const MAX_HELD: usize = 64;
 pub const MAX_ABILITIES: usize = 64;
 
@@ -107,10 +107,18 @@ pub const E_WEATHER_END: i32 = 40; // c=clima
 pub const E_WEATHER_CHIP: i32 = 41; // a=lado, b=casilla, c=daño, d=clima
 pub const E_TERRAIN: i32 = 42; // c=tipo
 pub const E_TERRAIN_END: i32 = 43; // c=tipo
+pub const E_PROTECT: i32 = 45; // a=lado, b=casilla
+pub const E_PROTECTED: i32 = 46; // a=lado, b=casilla (del que se protege)
+pub const E_FLINCH: i32 = 47; // a=lado, b=casilla
+pub const E_TRAP: i32 = 48; // a=lado, b=casilla
+pub const E_TRAP_CHIP: i32 = 49; // a=lado, b=casilla, c=daño
+pub const E_TRAP_END: i32 = 50; // a=lado, b=casilla
+pub const E_TRAPPED: i32 = 51; // a=lado, b=casilla: no puede huir/cambiar
+pub const E_PHAZE: i32 = 52; // a=lado, b=casilla, c=nueva criatura (-1: el combate termina)
 pub const E_HELD: i32 = 44; // a=lado, b=casilla, c=objeto equipado, d=cantidad | consumido<<16
 
 #[derive(Clone, Copy)]
-struct MoveD { ty: i32, cat: i32, power: i32, acc: i32, prio: i32, st: i32, st_chance: i32, stat: i32, stages: i32, stat_foe: i32, stat_chance: i32, drain: i32, recoil: i32, heal: i32, hits_min: i32, hits_max: i32, crit: i32, charge: i32, recharge: i32, weather: i32, terrain: i32 }
+struct MoveD { ty: i32, cat: i32, power: i32, acc: i32, prio: i32, st: i32, st_chance: i32, stat: i32, stages: i32, stat_foe: i32, stat_chance: i32, drain: i32, recoil: i32, heal: i32, hits_min: i32, hits_max: i32, crit: i32, charge: i32, recharge: i32, weather: i32, terrain: i32, protect: i32, flinch: i32, trap: i32, phaze: i32 }
 #[derive(Clone, Copy)]
 struct HeldD { kind: i32, a: i32, b: i32 }
 #[derive(Clone, Copy)]
@@ -122,7 +130,7 @@ struct AbilityD { kind: i32, a: i32, b: i32 }
 #[derive(Clone, Copy)]
 pub struct Mon { pub species: i32, pub level: i32, pub hp: i32, pub exp: i32, pub nm: usize, pub moves: [i32; 4], pub status: i32, pub held: i32 }
 const NO_MON: Mon = Mon { species: 0, level: 1, hp: 0, exp: 0, nm: 0, moves: [0; 4], status: 0, held: -1 };
-const NO_MOVE: MoveD = MoveD { ty: 0, cat: 0, power: 0, acc: 100, prio: 0, st: 0, st_chance: 0, stat: -1, stages: 0, stat_foe: 0, stat_chance: 100, drain: 0, recoil: 0, heal: 0, hits_min: 1, hits_max: 1, crit: 0, charge: 0, recharge: 0, weather: 0, terrain: -1 };
+const NO_MOVE: MoveD = MoveD { ty: 0, cat: 0, power: 0, acc: 100, prio: 0, st: 0, st_chance: 0, stat: -1, stages: 0, stat_foe: 0, stat_chance: 100, drain: 0, recoil: 0, heal: 0, hits_min: 1, hits_max: 1, crit: 0, charge: 0, recharge: 0, weather: 0, terrain: -1, protect: 0, flinch: 0, trap: 0, phaze: 0 };
 
 #[derive(Clone, Copy)]
 struct Unit { side: usize, slot: usize, kind: i32, a: i32, b: i32, mon: usize }
@@ -148,6 +156,11 @@ pub struct Battle {
     /// Movimiento en carga (índice+1) y casilla objetivo; y criaturas que deben recargar.
     charging: [[(i32, i32); 6]; 2],
     recharging: [[bool; 6]; 2],
+    /// Protección (este turno / el anterior), retroceso y atrapamiento (turnos restantes).
+    prot: [[bool; 6]; 2],
+    prot_prev: [[bool; 6]; 2],
+    flinched: [[bool; 6]; 2],
+    trapped: [[i32; 6]; 2],
     /// Clima y terreno activos: (tipo, turnos restantes); turnos < 0 = permanente.
     weather: (i32, i32),
     terrain: (i32, i32),
@@ -182,6 +195,10 @@ impl Battle {
             sleep: [[0; 6]; 2],
             charging: [[(0, 0); 6]; 2],
             recharging: [[false; 6]; 2],
+            prot: [[false; 6]; 2],
+            prot_prev: [[false; 6]; 2],
+            flinched: [[false; 6]; 2],
+            trapped: [[0; 6]; 2],
             weather: (0, 0),
             terrain: (-1, 0),
             active: [[-2; 2]; 2],
@@ -212,7 +229,7 @@ impl Battle {
             self.wrules[w] = WeatherD { boost, weaken, chip, n_imm, imm };
         }
         for i in 0..self.n_moves {
-            self.moves[i] = MoveD { ty: next(), cat: next(), power: next(), acc: next(), prio: next(), st: next(), st_chance: next(), stat: next(), stages: next(), stat_foe: next(), stat_chance: next(), drain: next(), recoil: next(), heal: next(), hits_min: next(), hits_max: next(), crit: next(), charge: next(), recharge: next(), weather: next(), terrain: next() };
+            self.moves[i] = MoveD { ty: next(), cat: next(), power: next(), acc: next(), prio: next(), st: next(), st_chance: next(), stat: next(), stages: next(), stat_foe: next(), stat_chance: next(), drain: next(), recoil: next(), heal: next(), hits_min: next(), hits_max: next(), crit: next(), charge: next(), recharge: next(), weather: next(), terrain: next(), protect: next(), flinch: next(), trap: next(), phaze: next() };
         }
         for i in 0..self.n_abilities { self.abilities[i] = AbilityD { kind: next(), a: next(), b: next() }; }
         for i in 0..self.n_helds { self.helds[i] = HeldD { kind: next(), a: next(), b: next() }; }
@@ -255,6 +272,10 @@ impl Battle {
         self.sleep = [[0; 6]; 2];
         self.charging = [[(0, 0); 6]; 2];
         self.recharging = [[false; 6]; 2];
+        self.prot = [[false; 6]; 2];
+        self.prot_prev = [[false; 6]; 2];
+        self.flinched = [[false; 6]; 2];
+        self.trapped = [[0; 6]; 2];
         self.terrain = (-1, 0);
         self.weather = (0, 0);
         self.n_events = 0;
@@ -465,6 +486,14 @@ impl Battle {
                         self.ev(E_HELD, side as i32, slot as i32, cur.held, heal);
                     }
                 }
+                if self.trapped[side][iu] > 0 {
+                    let d = (self.max_hp(&self.team[side][iu]) / 8).max(1);
+                    self.team[side][iu].hp = (self.team[side][iu].hp - d).max(0);
+                    self.ev(E_TRAP_CHIP, side as i32, slot as i32, d, 0);
+                    self.trapped[side][iu] -= 1;
+                    if self.team[side][iu].hp <= 0 { self.faint(side, slot); continue; }
+                    if self.trapped[side][iu] == 0 { self.ev(E_TRAP_END, side as i32, slot as i32, 0, 0); }
+                }
                 self.check_berry(side, slot);
                 let (ai, ab) = self.ability(side, iu);
                 if ab.kind == AB_SPEED_BOOST && self.stages[side][iu][4] < 6 {
@@ -473,6 +502,9 @@ impl Battle {
                 }
             }
         }
+        self.prot_prev = self.prot;
+        self.prot = [[false; 6]; 2];
+        self.flinched = [[false; 6]; 2];
         // el clima y el terreno se agotan
         if self.weather.1 > 0 { self.weather.1 -= 1; if self.weather.1 == 0 { let w = self.weather.0; self.weather = (0, 0); self.ev(E_WEATHER_END, 0, 0, w, 0); } }
         if self.terrain.1 > 0 { self.terrain.1 -= 1; if self.terrain.1 == 0 { let t = self.terrain.0; self.terrain = (-1, 0); self.ev(E_TERRAIN_END, 0, 0, t, 0); } }
@@ -520,6 +552,11 @@ impl Battle {
                 self.ev(E_RECHARGE, u.side as i32, u.slot as i32, 0, 0);
                 continue;
             }
+            if self.flinched[u.side][u.mon] {
+                self.flinched[u.side][u.mon] = false;
+                self.ev(E_FLINCH, u.side as i32, u.slot as i32, 0, 0);
+                continue;
+            }
             if u.side == 0 { self.player_act(u); }
             else if u.kind == A_MOVE && self.can_act(1, u.slot) { self.attack(1, u.slot, u.a, u.b); }
         }
@@ -533,11 +570,14 @@ impl Battle {
             A_MOVE => { if (u.a as usize) < mon.nm && self.can_act(0, u.slot) { self.attack(0, u.slot, u.a, u.b); } }
             A_SWITCH => {
                 let to = u.a;
+                if self.trapped[0][u.mon] > 0 { self.ev(E_TRAPPED, 0, u.slot as i32, 0, 0); return; }
                 if to < 0 || to as usize >= self.n[0] || self.team[0][to as usize].hp <= 0 || self.active[0].contains(&to) { return; }
                 self.ev(E_SWITCH_OUT, u.mon as i32, 0, 0, 0);
                 self.stages[0][u.mon] = [0; 7];
                 self.charging[0][u.mon] = (0, 0);
                 self.recharging[0][u.mon] = false;
+                self.prot[0][u.mon] = false;
+                self.flinched[0][u.mon] = false;
                 self.active[0][u.slot] = to;
                 self.ev(E_SWITCH_IN, to, 0, 0, 0);
                 self.on_enter(0, u.slot);
@@ -567,6 +607,7 @@ impl Battle {
             }
             A_RUN => {
                 if self.trainer { self.ev(E_NO_RUN, 0, 0, 0, 0); return; }
+                if self.trapped[0][u.mon] > 0 { self.ev(E_TRAPPED, 0, u.slot as i32, 0, 0); return; }
                 let fi = self.first_foe();
                 let chance = (50 + self.eff_stat(0, u.mon, 5) - self.eff_stat(1, fi, 5)).clamp(25, 95);
                 if (Self::rnd(100) as i32) < chance { self.ev(E_RUN_OK, 0, 0, 0, 0); self.result = R_RUN; } else { self.ev(E_RUN_FAIL, 0, 0, 0, 0); }
@@ -610,6 +651,12 @@ impl Battle {
             self.ev(E_CHARGE, side as i32, slot as i32, 0, 0);
             return;
         }
+        if mv.protect != 0 {
+            if self.prot_prev[side][ai] { self.ev(E_MISS, 0, 0, 0, 0); } else { self.prot[side][ai] = true; self.ev(E_PROTECT, side as i32, slot as i32, 0, 0); }
+            return;
+        }
+        let targets_foe = mv.power > 0 || mv.st > 0 || mv.stat_foe != 0 || mv.phaze != 0;
+        if targets_foe && self.prot[other][di] { self.ev(E_PROTECTED, other as i32, ts as i32, 0, 0); return; }
         // precisión y evasión (etapas 5 y 6)
         let st = (self.stages[side][ai][5] - self.stages[other][di][6]).clamp(-6, 6);
         let acc = if st >= 0 { mv.acc * (3 + st) / 3 } else { mv.acc * 3 / (3 - st) };
@@ -696,10 +743,42 @@ impl Battle {
             let (s, k) = if mv.stat_foe != 0 { (other, ts) } else { (side, slot) };
             any |= self.change_stage(s, k, mv.stat as usize, mv.stages);
         }
+        let ti = self.active[other][ts];
+        if ti >= 0 && self.team[other][ti as usize].hp > 0 {
+            let ti = ti as usize;
+            if mv.flinch > 0 && (Self::rnd(100) as i32) < mv.flinch { self.flinched[other][ti] = true; }
+            if mv.trap > 0 && self.trapped[other][ti] == 0 {
+                self.trapped[other][ti] = 4 + Self::rnd(2) as i32;
+                self.ev(E_TRAP, other as i32, ts as i32, 0, 0);
+                any = true;
+            }
+            if mv.phaze != 0 { any |= self.phaze(other, ts); }
+        }
         any
     }
 
     /// Movimientos sin daño: solo aplican sus efectos; si nada surte efecto, "¡Pero falló!".
+    /// Obliga al objetivo a salir: un rival salvaje huye (el combate termina); en los demás casos entra otra criatura al azar.
+    fn phaze(&mut self, side: usize, slot: usize) -> bool {
+        let cur = self.active[side][slot];
+        if side == 1 && !self.trainer {
+            self.ev(E_PHAZE, side as i32, slot as i32, -1, 0);
+            self.result = R_RUN;
+            return true;
+        }
+        let bench: Vec<usize> = (0..self.n[side]).filter(|&i| self.team[side][i].hp > 0 && !self.active[side].contains(&(i as i32))).collect();
+        if bench.is_empty() { return false; }
+        let to = bench[Self::rnd(bench.len() as u32) as usize];
+        self.stages[side][cur as usize] = [0; 7];
+        self.charging[side][cur as usize] = (0, 0);
+        self.trapped[side][cur as usize] = 0;
+        self.active[side][slot] = to as i32;
+        self.stages[side][to] = [0; 7];
+        self.ev(E_PHAZE, side as i32, slot as i32, to as i32, 0);
+        self.on_enter(side, slot);
+        true
+    }
+
     fn status_move(&mut self, side: usize, slot: usize, other: usize, ts: usize, mv: &MoveD) {
         let mut any = self.secondary(side, slot, other, ts, mv);
         if mv.heal > 0 {
@@ -715,6 +794,8 @@ impl Battle {
         let mi = self.active[side][slot] as usize;
         self.ev(E_FAINT, side as i32, slot as i32, mi as i32, 0);
         self.stages[side][mi] = [0; 7];
+        self.trapped[side][mi] = 0;
+        self.prot[side][mi] = false;
         if side == 1 {
             let f = self.team[1][mi];
             let gain = if self.trainer { f.level * 9 } else { f.level * 6 } + 10;
@@ -810,7 +891,7 @@ mod tests {
         let mut v: Vec<i32> = vec![2, 2, 3, 0, 0];
         v.extend([100, 200, 100, 100]); // tabla de tipos ×100
         v.extend([-1, -1, 0, 0, -1, -1, -1, -1].repeat(4)); // reglas de clima (sin efectos)
-        for m in [[0, 0, 40, 100], [1, 1, 70, 100]] { v.extend(m); v.extend([0, 0, 0, -1, 0, 0, 100, 0, 0, 0, 1, 1, 0, 0, 0, 0, -1]); } // movimientos: tipo, cat, poder, precisión + efectos
+        for m in [[0, 0, 40, 100], [1, 1, 70, 100]] { v.extend(m); v.extend([0, 0, 0, -1, 0, 0, 100, 0, 0, 0, 1, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0]); } // movimientos: tipo, cat, poder, precisión + efectos
         let mut sp = |t: [i32; 2], st: [i32; 6], evo: (i32, i32), learn: &[(i32, i32)]| {
             v.extend(t); v.extend(st); v.extend([evo.0, evo.1, learn.len() as i32]);
             for k in 0..8 { let (l, m) = learn.get(k).copied().unwrap_or((0, 0)); v.extend([l, m]); }
@@ -920,7 +1001,7 @@ mod tests {
     /// Movimientos: 0 placaje, 1 ascua (quema), 2 espora (sueño), 3 danza (+2 ataque), 4 rápido (prio +1), 5 drenaje, 6 retroceso, 7 recuperación.
     fn load_fx(b: &mut Battle) {
         // 15 movimientos, 4 habilidades, 5 objetos equipables, 4 especies
-        let mut v: Vec<i32> = vec![2, 15, 4, 4, 5];
+        let mut v: Vec<i32> = vec![2, 19, 4, 4, 5];
         v.extend([100, 200, 100, 100]);
         // clima: [impulsa, debilita, daño, n_inmunes, inm×4]
         v.extend([1, 0, 0, 0, -1, -1, -1, -1]); // 1 sol: potencia el tipo 1, debilita el 0
@@ -939,7 +1020,7 @@ mod tests {
             [0, 0, 100, 100, 0, 0, 0, -1, 0, 0, 100, 0, 50, 0],
             [0, 0, 0, 100, 0, 0, 0, -1, 0, 0, 100, 0, 0, 50],
         ];
-        for m in fx { v.extend(m); v.extend(none); }
+        for m in fx { v.extend(m); v.extend(none); v.extend([0; 4]); }
         let ext: [([i32; 14], [i32; 7]); 7] = [
             ([0, 0, 20, 100, 0, 0, 0, -1, 0, 0, 100, 0, 0, 0], [2, 5, 0, 0, 0, 0, -1]), // 8 multigolpe 2–5
             ([0, 0, 60, 100, 0, 0, 0, -1, 0, 0, 100, 0, 0, 0], [1, 1, 0, 1, 0, 0, -1]), // 9 carga
@@ -949,7 +1030,15 @@ mod tests {
             ([0, 0, 0, 100, 0, 0, 0, 5, -2, 1, 100, 0, 0, 0], [1, 1, 0, 0, 0, 0, -1]), // 13 baja la precisión del rival
             ([0, 0, 40, 100, 0, 0, 0, -1, 0, 0, 100, 0, 0, 0], [1, 1, 3, 0, 0, 0, -1]), // 14 crítico alto
         ];
-        for (m, e) in ext { v.extend(m); v.extend(e); }
+        for (m, e) in ext { v.extend(m); v.extend(e); v.extend([0; 4]); }
+        // 15 protección, 16 retroceso 100 %, 17 atrapa, 18 obliga a cambiar: [proteger, retroceso, atrapar, forzar cambio]
+        let ext2: [([i32; 14], [i32; 4]); 4] = [
+            ([0, 0, 0, 100, 3, 0, 0, -1, 0, 0, 100, 0, 0, 0], [1, 0, 0, 0]),
+            ([0, 0, 40, 100, 0, 0, 0, -1, 0, 0, 100, 0, 0, 0], [0, 100, 0, 0]),
+            ([0, 0, 20, 100, 0, 0, 0, -1, 0, 0, 100, 0, 0, 0], [0, 0, 1, 0]),
+            ([0, 0, 0, 100, 0, 0, 0, -1, 0, 0, 100, 0, 0, 0], [0, 0, 0, 1]),
+        ];
+        for (m, e) in ext2 { v.extend(m); v.extend(none); v.extend(e); }
         v.extend([AB_INTIMIDATE, 0, 0, AB_ABSORB, 1, 25, AB_SPEED_BOOST, 0, 0, AB_WEATHER, 2, 0]); // habilidades 0–3
         v.extend([H_BOOST, 0, 50, H_LEFTOVERS, 0, 0, H_BERRY, 0, 50, H_CURE_BERRY, 0, 0, H_FOCUS, 0, 0]); // objetos 0–4
         let mut sp = |t: [i32; 2], st: [i32; 6], ab: i32| {
@@ -1101,6 +1190,49 @@ mod tests {
         assert_eq!(count(&b, n, E_RECHARGE), 1);
         let n = b.turn([[A_MOVE, 0, 0], [A_NONE, 0, 0]]);
         assert_eq!(count(&b, n, E_RECHARGE), 0, "después de recargar vuelve a actuar");
+    }
+
+    #[test]
+    fn protect_flinch_trap_and_phaze() {
+        // protección: el golpe rival se anula; usarla dos turnos seguidos falla
+        let mut b = fx_battle(61, (0, 40), (0, 40), [15, 0]);
+        b.start(true, false, 0);
+        let hp0 = b.team[0][0].hp;
+        let n = b.turn([[A_MOVE, 0, 0], [A_NONE, 0, 0]]);
+        assert_eq!(count(&b, n, E_PROTECT), 1);
+        assert_eq!(count(&b, n, E_PROTECTED), 1);
+        assert_eq!(b.team[0][0].hp, hp0, "protegido: sin daño");
+        let n = b.turn([[A_MOVE, 0, 0], [A_NONE, 0, 0]]);
+        assert_eq!(count(&b, n, E_PROTECT), 0, "segundo uso seguido falla");
+        assert!(b.team[0][0].hp < hp0);
+        // retroceso: el rival (más lento) pierde el turno
+        let mut b = fx_battle(62, (0, 40), (0, 20), [16, 0]);
+        b.start(true, false, 0);
+        b.team[1][0].hp = 9999;
+        let hp0 = b.team[0][0].hp;
+        let n = b.turn([[A_MOVE, 0, 0], [A_NONE, 0, 0]]);
+        assert_eq!(count(&b, n, E_FLINCH), 1);
+        assert_eq!(b.team[0][0].hp, hp0);
+        // atrapar: no se puede cambiar ni huir, y se recibe daño residual hasta que acaba
+        let mut b = fx_battle(63, (0, 40), (0, 40), [0, 0]);
+        b.start(true, false, 0);
+        b.team[0][0].hp = 9999;
+        b.trapped[0][0] = 2;
+        let n = b.turn([[A_SWITCH, 0, 0], [A_NONE, 0, 0]]);
+        assert_eq!(count(&b, n, E_TRAPPED), 1);
+        let mut b = fx_battle(64, (0, 40), (0, 20), [17, 0]);
+        b.start(true, false, 0);
+        b.team[1][0].hp = 9999;
+        let mut chips = 0;
+        let mut ended = false;
+        for t in 0..8 { let n = b.turn([[A_MOVE, if t == 0 { 0 } else { 1 }, 0], [A_NONE, 0, 0]]); chips += count(&b, n, E_TRAP_CHIP); ended |= count(&b, n, E_TRAP_END) > 0; }
+        assert!(chips >= 4 && ended, "chips={chips} ended={ended}");
+        // forzar cambio: en combate salvaje el rival huye
+        let mut b = fx_battle(65, (0, 40), (0, 20), [18, 0]);
+        b.start(false, false, 0);
+        let n = b.turn([[A_MOVE, 0, 0], [A_NONE, 0, 0]]);
+        assert_eq!(count(&b, n, E_PHAZE), 1);
+        assert_eq!(b.result, R_RUN);
     }
 
     #[test]

@@ -5,6 +5,7 @@ import { Battle, healAll, makeMon, monMaxHp } from "./battle";
 import { movesFromCsv, movesToCsv, parseCsv, speciesFromCsv, speciesToCsv, toCsv } from "./csv";
 import { parseScript, runScript } from "./script";
 import { decodeTiles, defaultProject, effectiveness, encodeTiles, migrate, parseProject, validate } from "./project";
+import { archipelagoProject } from "./templates";
 
 const wasm = () => readFileSync(new URL("../public/engine_core.wasm", import.meta.url));
 
@@ -364,6 +365,32 @@ describe("combate: estados, etapas, habilidades y efectos de movimientos", () =>
     expect(recoil.some((t) => t.includes("retroceso"))).toBe(true);
     const dance = texts(b.turn({ kind: "move", index: 3 }));
     expect(dance.some((t) => t.includes("sube mucho"))).toBe(true);
+  });
+  it("protección, amedrentar, atrapar y forzar cambio funcionan de extremo a extremo", async () => {
+    const e = await Engine.load(wasm());
+    const p = archipelagoProject();
+    const run = (mine: string[], seed: number, opts: { trainer?: string } = {}) => {
+      e.reset(8, 8, seed);
+      const me = makeMon(p, "rocalon", 45), foe = makeMon(p, "pelusin", 20);
+      me.moves = mine;
+      const b = new Battle(p, e, [me], [foe], { ...opts, inv: {} });
+      return { b, me, foe };
+    };
+    // protección: el golpe del rival se anula y la segunda vez seguida falla
+    const a = run(["proteccion"], 5, { trainer: "T" });
+    const t1 = texts(a.b.turn({ kind: "move", index: 0 }));
+    expect(t1.some((t) => t.includes("se protege"))).toBe(true);
+    expect(t1.some((t) => t.includes("se ha protegido"))).toBe(true);
+    // atrapar
+    const c = run(["atadura"], 11, { trainer: "T" });
+    let all: string[] = [];
+    for (let i = 0; i < 5; i++) all = all.concat(texts(c.b.turn({ kind: "move", index: 0 })));
+    expect(all.some((t) => t.includes("queda atrapado"))).toBe(true);
+    // forzar cambio contra una criatura salvaje: huye
+    const d = run(["rugido"], 3);
+    const t4 = texts(d.b.turn({ kind: "move", index: 0 }));
+    expect(t4.some((t) => t.includes("huye despavorido"))).toBe(true);
+    expect(d.b.result).toBe("run");
   });
   it("Absorbe Agua cura al rival en lugar de dañarlo; las habilidades inexistentes no rompen nada", async () => {
     const e = await Engine.load(wasm());

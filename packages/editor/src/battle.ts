@@ -43,7 +43,7 @@ export const healAll = (p: Project, party: Mon[]) => party.forEach((m) => { m.hp
 
 // Códigos del protocolo con Rust (deben coincidir con battle.rs)
 const A = { move: 1, switch: 2, heal: 3, ball: 4, run: 5, noitem: 6, cure: 7 };
-const E = { use: 1, miss: 2, hit: 3, faint: 4, exp: 5, level: 6, learn: 7, evolve: 8, sendout: 9, out: 10, in: 11, heal: 12, noitem: 13, throw: 14, catch: 15, ballFail: 16, runOk: 17, runFail: 18, noRun: 19, noCatch: 20, forceIn: 21, status: 22, stage: 23, cant: 24, wake: 25, thaw: 26, chip: 27, drain: 28, recoil: 29, selfHeal: 30, ability: 31, immune: 32, absorb: 33, cure: 34, noEffect: 35, charge: 36, recharge: 37, multi: 38, weather: 39, weatherEnd: 40, weatherChip: 41, terrain: 42, terrainEnd: 43, held: 44 };
+const E = { use: 1, miss: 2, hit: 3, faint: 4, exp: 5, level: 6, learn: 7, evolve: 8, sendout: 9, out: 10, in: 11, heal: 12, noitem: 13, throw: 14, catch: 15, ballFail: 16, runOk: 17, runFail: 18, noRun: 19, noCatch: 20, forceIn: 21, status: 22, stage: 23, cant: 24, wake: 25, thaw: 26, chip: 27, drain: 28, recoil: 29, selfHeal: 30, ability: 31, immune: 32, absorb: 33, cure: 34, noEffect: 35, charge: 36, recharge: 37, multi: 38, weather: 39, weatherEnd: 40, weatherChip: 41, terrain: 42, terrainEnd: 43, held: 44, protect: 45, protected: 46, flinch: 47, trap: 48, trapChip: 49, trapEnd: 50, trapped: 51, phaze: 52 };
 const EV_STRIDE = 17;
 const RESULTS: (BattleResult | null)[] = [null, "win", "lose", "run", "caught"];
 const MON_STRIDE = 11;
@@ -115,7 +115,8 @@ export class Battle {
         e.stat ? BATTLE_STATS.indexOf(e.stat.stat) : -1, e.stat?.stages ?? 0, e.stat?.target === "foe" ? 1 : 0, e.stat?.chance ?? 100,
         e.drain ?? 0, e.recoil ?? 0, e.heal ?? 0,
         e.hits?.min ?? 1, e.hits?.max ?? 1, e.crit ?? 0, e.charge ? 1 : 0, e.recharge ? 1 : 0,
-        e.weather ? WEATHER_KINDS.indexOf(e.weather) + 1 : 0, e.terrain ? m.type : -1);
+        e.weather ? WEATHER_KINDS.indexOf(e.weather) + 1 : 0, e.terrain ? m.type : -1,
+        e.protect ? 1 : 0, e.flinch ?? 0, e.trap ? 1 : 0, e.phaze ? 1 : 0);
     }
     const KIND: Record<string, number> = { immune: 1, absorb: 2, statusImmune: 3, intimidate: 4, pinch: 5, speedBoost: 6, weather: 7 };
     for (const a of abilities) put(KIND[a.kind] ?? 0, a.kind === "statusImmune" ? STATUS_KINDS.indexOf(a.status ?? "burn") + 1 : a.kind === "weather" ? WEATHER_KINDS.indexOf(a.weather ?? "sun") + 1 : (a.type ?? 0), a.amount ?? 0);
@@ -294,6 +295,14 @@ export class Battle {
         case E.noEffect: push("No tendría ningún efecto."); break;
         case E.charge: push(`¡${cap(slotName(a, b))} acumula energía!`); break;
         case E.recharge: push(`¡${cap(slotName(a, b))} debe recuperarse!`); break;
+        case E.protect: push(`¡${cap(slotName(a, b))} se protege!`); break;
+        case E.protected: push(`¡${cap(slotName(a, b))} se ha protegido del ataque!`, "weak"); break;
+        case E.flinch: push(`¡${cap(slotName(a, b))} se amedrenta y no puede moverse!`); break;
+        case E.trap: push(`¡${cap(slotName(a, b))} queda atrapado!`); break;
+        case E.trapChip: push(`${cap(slotName(a, b))} sufre por estar atrapado.`, "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.trapEnd: push(`${cap(slotName(a, b))} se libera.`); break;
+        case E.trapped: push(`¡${cap(slotName(a, b))} no puede escapar, está atrapado!`); break;
+        case E.phaze: push(c < 0 ? `¡${cap(slotName(a, b))} huye despavorido!` : `¡${cap(slotName(a, b))} es obligado a retirarse!`); break;
         case E.multi: push(`¡Golpeó ${c} veces!`); break;
         case E.weather: push({ sun: "¡El sol brilla con fuerza!", rain: "¡Empieza a llover!", sand: "¡Se levanta una tormenta de arena!", hail: "¡Empieza a granizar!" }[WEATHER_KINDS[c - 1]] ?? "El clima cambia."); break;
         case E.weatherEnd: push({ sun: "El sol vuelve a la normalidad.", rain: "La lluvia cesa.", sand: "La tormenta de arena amaina.", hail: "El granizo cesa." }[WEATHER_KINDS[c - 1]] ?? "El clima se calma."); break;

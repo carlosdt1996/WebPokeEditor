@@ -61,6 +61,14 @@ export interface MoveEffect {
   weather?: WeatherKind;
   /** Crea un terreno de 5 turnos que potencia (+30 %) los movimientos del mismo tipo que este movimiento. */
   terrain?: boolean;
+  /** Protege al usuario de los ataques este turno (falla si se usó el turno anterior). */
+  protect?: boolean;
+  /** % de probabilidad de que el objetivo pierda su turno (si actúa después). */
+  flinch?: number;
+  /** Atrapa al objetivo 4–5 turnos: no puede huir ni cambiar y sufre 1/8 de sus PS por turno. */
+  trap?: boolean;
+  /** Obliga al objetivo a cambiar (un rival salvaje huye). */
+  phaze?: boolean;
 }
 
 export type AbilityKind = "immune" | "absorb" | "statusImmune" | "intimidate" | "pinch" | "speedBoost" | "weather";
@@ -439,7 +447,7 @@ export function validate(p: Project): string[] {
       if (e.stat && (e.stat.stages < -6 || e.stat.stages > 6)) errs.push(`${m.name}: el cambio de estadística va de −6 a +6`);
       if (e.hits && !(e.hits.min >= 1 && e.hits.max >= e.hits.min && e.hits.max <= 5)) errs.push(`${m.name}: los golpes van de 1 a 5 (mín ≤ máx)`);
       if (e.crit !== undefined && (e.crit < 0 || e.crit > 3)) errs.push(`${m.name}: el crítico va de 0 a 3`);
-      for (const [k, v] of [["drenaje", e.drain], ["retroceso", e.recoil], ["curación", e.heal], ["prob. de estado", e.status?.chance], ["prob. de estadística", e.stat?.chance]] as const) if (v !== undefined && (v < 0 || v > 100)) errs.push(`${m.name}: ${k} fuera de 0–100`);
+      for (const [k, v] of [["drenaje", e.drain], ["retroceso", e.recoil], ["curación", e.heal], ["retroceso del rival", e.flinch], ["prob. de estado", e.status?.chance], ["prob. de estadística", e.stat?.chance]] as const) if (v !== undefined && (v < 0 || v > 100)) errs.push(`${m.name}: ${k} fuera de 0–100`);
     }
   }
   if (p.typeChart.length !== p.types.length || p.typeChart.some((r) => r.length !== p.types.length)) errs.push("typeChart no coincide con los tipos");

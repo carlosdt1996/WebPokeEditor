@@ -27,7 +27,7 @@ export function parseCsv(text: string): string[][] {
 
 const SPECIES_HEAD = ["id", "nombre", "tipo1", "tipo2", ...STAT_KEYS, "movimientos", "evoluciona_nivel", "evoluciona_en", "aprende", "habilidad"];
 const SPECIES_OPTIONAL = ["tipo2", "evoluciona_nivel", "evoluciona_en", "aprende", "habilidad"];
-const MOVE_HEAD = ["id", "nombre", "tipo", "categoria", "poder", "precision", "prioridad", "estado", "prob_estado", "estadistica", "etapas", "objetivo_estadistica", "prob_estadistica", "drenaje", "retroceso", "cura", "golpes_min", "golpes_max", "critico", "carga", "recarga", "clima", "terreno"];
+const MOVE_HEAD = ["id", "nombre", "tipo", "categoria", "poder", "precision", "prioridad", "estado", "prob_estado", "estadistica", "etapas", "objetivo_estadistica", "prob_estadistica", "drenaje", "retroceso", "cura", "golpes_min", "golpes_max", "critico", "carga", "recarga", "clima", "terreno", "proteccion", "amedrentar", "atrapar", "forzar_cambio"];
 const MOVE_OPTIONAL = MOVE_HEAD.slice(6);
 
 export function speciesToCsv(p: Project): string {
@@ -43,7 +43,7 @@ export function movesToCsv(p: Project): string {
     return [m.id, m.name, p.types[m.type] ?? "", m.category === "physical" ? "fisico" : "especial", m.power, m.accuracy,
       e.priority ?? "", e.status?.kind ?? "", e.status?.chance ?? "", e.stat?.stat ?? "", e.stat?.stages ?? "", e.stat ? (e.stat.target === "foe" ? "rival" : "usuario") : "", e.stat?.chance ?? "",
       e.drain ?? "", e.recoil ?? "", e.heal ?? "",
-      e.hits?.min ?? "", e.hits?.max ?? "", e.crit ?? "", e.charge ? 1 : "", e.recharge ? 1 : "", e.weather ?? "", e.terrain ? 1 : ""];
+      e.hits?.min ?? "", e.hits?.max ?? "", e.crit ?? "", e.charge ? 1 : "", e.recharge ? 1 : "", e.weather ?? "", e.terrain ? 1 : "", e.protect ? 1 : "", e.flinch ?? "", e.trap ? 1 : "", e.phaze ? 1 : ""];
   })]);
 }
 
@@ -111,6 +111,10 @@ export function movesFromCsv(p: Project, text: string): CsvResult<Move> {
       else eff.weather = r.get("clima") as WeatherKind;
     }
     if (num("terreno")) eff.terrain = true;
+    if (num("proteccion")) eff.protect = true;
+    if (num("amedrentar")) eff.flinch = Math.max(0, Math.min(100, num("amedrentar")!));
+    if (num("atrapar")) eff.trap = true;
+    if (num("forzar_cambio")) eff.phaze = true;
     if (Object.keys(eff).length) mv.effect = eff;
     items.push(mv);
   }

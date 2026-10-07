@@ -106,7 +106,7 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
 
     // Efectos de movimientos (por datos)
     const eff = (m: Move) => (m.effect ??= {});
-    const clean = (m: Move) => { const e = m.effect; if (e && !e.priority && !e.status && !e.stat && !e.drain && !e.recoil && !e.heal && !e.hits && !e.crit && !e.charge && !e.recharge && !e.weather && !e.terrain) delete m.effect; };
+    const clean = (m: Move) => { const e = m.effect; if (e && !e.priority && !e.status && !e.stat && !e.drain && !e.recoil && !e.heal && !e.hits && !e.crit && !e.charge && !e.recharge && !e.weather && !e.terrain && !e.protect && !e.flinch && !e.trap && !e.phaze) delete m.effect; };
     const fxRows = p.moves.map((m) => h("tr", {},
       h("td", {}, h("b", {}, m.name)),
       h("td", {}, num(m.effect?.priority ?? 0, (n) => { eff(m).priority = n || undefined; clean(m); }, -3, 3)),
@@ -129,6 +129,10 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
       h("td", {}, h("select", { onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) eff(m).weather = v as WeatherKind; else delete eff(m).weather; clean(m); onChange(); } },
         h("option", { value: "" }, "—"), ...WEATHER_KINDS.map((k) => h("option", { value: k, selected: m.effect?.weather === k }, WEATHER_NAMES[k])))),
       h("td", {}, h("input", { type: "checkbox", checked: !!m.effect?.terrain, title: "Crea un terreno que potencia el tipo de este movimiento", onchange: (e: Event) => { eff(m).terrain = (e.target as HTMLInputElement).checked || undefined; clean(m); onChange(); } })),
+      h("td", {}, h("input", { type: "checkbox", checked: !!m.effect?.protect, onchange: (e: Event) => { eff(m).protect = (e.target as HTMLInputElement).checked || undefined; clean(m); onChange(); } })),
+      h("td", {}, num(m.effect?.flinch ?? 0, (n) => { eff(m).flinch = n || undefined; clean(m); }, 0, 100)),
+      h("td", {}, h("input", { type: "checkbox", checked: !!m.effect?.trap, onchange: (e: Event) => { eff(m).trap = (e.target as HTMLInputElement).checked || undefined; clean(m); onChange(); } })),
+      h("td", {}, h("input", { type: "checkbox", checked: !!m.effect?.phaze, onchange: (e: Event) => { eff(m).phaze = (e.target as HTMLInputElement).checked || undefined; clean(m); onChange(); } })),
     ));
 
     // Habilidades
@@ -207,7 +211,7 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
       h("h2", {}, "Efectos de los movimientos"),
       h("p", { class: "muted" }, "Un movimiento con poder 0 solo aplica sus efectos. Prioridad −3…+3 · estado y cambio de estadística (incluye Precisión y Evasión) con probabilidad · drenaje/retroceso = % del daño · cura = % de los PS máximos · golpes 2–5 · crítico 0–3 (1/16, 1/8, 1/4, 1/2) · carga = tarda un turno · recarga = pierde el turno siguiente · clima/terreno duran 5 turnos."),
       h("div", { class: "scroll" }, h("table", {},
-        h("thead", {}, h("tr", {}, ...["Movimiento", "Prioridad", "Estado al rival", "Cambio de estadística (etapas)", "Drenaje %", "Retroceso %", "Cura %", "Golpes", "Crítico 0–3", "Carga", "Recarga", "Clima", "Terreno"].map((t) => h("th", {}, t)))),
+        h("thead", {}, h("tr", {}, ...["Movimiento", "Prioridad", "Estado al rival", "Cambio de estadística (etapas)", "Drenaje %", "Retroceso %", "Cura %", "Golpes", "Crítico 0–3", "Carga", "Recarga", "Clima", "Terreno", "Protege", "Amedrenta %", "Atrapa", "Fuerza cambio"].map((t) => h("th", {}, t)))),
         h("tbody", {}, ...fxRows))),
       h("h2", {}, "Reglas de clima"),
       h("p", { class: "muted" }, "Qué tipo potencia (+50 %) y debilita (−50 %) cada clima, si hace daño residual (1/16 de los PS) y qué tipos son inmunes (máx. 4). Cada mapa puede tener un clima permanente en sus combates."),
