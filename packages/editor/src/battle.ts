@@ -4,9 +4,9 @@
  * eventos devuelta a texto en español. Es reproducible por semilla (usa el mismo RNG que el mundo).
  */
 import type { Engine } from "./engine";
-import { LIMITS, type Move, type Project, maxHp } from "./project";
+import { BATTLE_STATS, BATTLE_STAT_NAMES, LIMITS, type Move, type Project, STATUS_KINDS, maxHp } from "./project";
 
-export interface Mon { species: string; level: number; hp: number; exp: number; moves: string[] }
+export interface Mon { species: string; level: number; hp: number; exp: number; moves: string[]; /** 0 = sano; 1…5 = índice+1 en STATUS_KINDS (persiste entre combates). */ status?: number }
 
 export type Action =
   | { kind: "move"; index: number; /** slot rival (0/1); por defecto el primero en pie */ target?: number }
@@ -16,7 +16,7 @@ export type Action =
 
 export type BattleResult = "win" | "lose" | "run" | "caught";
 
-export interface SlotSnap { i: number; hp: number }
+export interface SlotSnap { i: number; hp: number; /** estado alterado (0 = ninguno) */ st: number }
 /** Estado visible tras cada evento: criatura (índice en su equipo) y PS por casilla activa; null = casilla vacía. */
 export interface Snapshot { p: (SlotSnap | null)[]; f: (SlotSnap | null)[] }
 export interface BattleEvent {
@@ -31,7 +31,7 @@ const expFor = (level: number) => level * level * 2;
 export function makeMon(p: Project, speciesId: string, level: number): Mon {
   const sp = p.species.find((s) => s.id === speciesId);
   if (!sp) throw new Error(`Especie inexistente: ${speciesId}`);
-  const m: Mon = { species: speciesId, level, hp: 0, exp: expFor(level), moves: sp.moves.slice(0, 4) };
+  const m: Mon = { species: speciesId, level, hp: 0, exp: expFor(level), moves: sp.moves.slice(0, 4), status: 0 };
   if (!m.moves.length && p.moves[0]) m.moves = [p.moves[0].id];
   m.hp = monMaxHp(p, m);
   return m;
@@ -39,13 +39,14 @@ export function makeMon(p: Project, speciesId: string, level: number): Mon {
 const spOf = (p: Project, m: Mon) => p.species.find((s) => s.id === m.species)!;
 export const monMaxHp = (p: Project, m: Mon) => maxHp(spOf(p, m).stats.hp, m.level);
 export const monName = (p: Project, m: Mon) => spOf(p, m).name;
-export const healAll = (p: Project, party: Mon[]) => party.forEach((m) => (m.hp = monMaxHp(p, m)));
+export const healAll = (p: Project, party: Mon[]) => party.forEach((m) => { m.hp = monMaxHp(p, m); m.status = 0; });
 
 // Códigos del protocolo con Rust (deben coincidir con battle.rs)
-const A = { move: 1, switch: 2, heal: 3, ball: 4, run: 5, noitem: 6 };
-const E = { use: 1, miss: 2, hit: 3, faint: 4, exp: 5, level: 6, learn: 7, evolve: 8, sendout: 9, out: 10, in: 11, heal: 12, noitem: 13, throw: 14, catch: 15, ballFail: 16, runOk: 17, runFail: 18, noRun: 19, noCatch: 20, forceIn: 21 };
+const A = { move: 1, switch: 2, heal: 3, ball: 4, run: 5, noitem: 6, cure: 7 };
+const E = { use: 1, miss: 2, hit: 3, faint: 4, exp: 5, level: 6, learn: 7, evolve: 8, sendout: 9, out: 10, in: 11, heal: 12, noitem: 13, throw: 14, catch: 15, ballFail: 16, runOk: 17, runFail: 18, noRun: 19, noCatch: 20, forceIn: 21, status: 22, stage: 23, cant: 24, wake: 25, thaw: 26, chip: 27, drain: 28, recoil: 29, selfHeal: 30, ability: 31, immune: 32, absorb: 33, cure: 34, noEffect: 35 };
+const EV_STRIDE = 17;
 const RESULTS: (BattleResult | null)[] = [null, "win", "lose", "run", "caught"];
-const MON_STRIDE = 9;
+const MON_STRIDE = 10;
 
 export class Battle {
   result: BattleResult | null = null;
@@ -53,6 +54,8 @@ export class Battle {
   pa: number[] = [];
   fa: number[] = [];
   readonly size: 1 | 2;
+  /** Eventos que ocurren al empezar (habilidades al entrar, p. ej. Intimidar). */
+  startEvents: BattleEvent[] = [];
   private spIdx = new Map<string, number>();
   private mvIdx = new Map<string, number>();
 
@@ -69,6 +72,7 @@ export class Battle {
     this.uploadTeams();
     this.size = this.e.btStart(!!opts.trainer, !!opts.double) === 2 ? 2 : 1;
     this.syncState();
+    this.startEvents = this.collect(this.e.btEventCount());
   }
 
   get isTrainer() { return !!this.opts.trainer; }
@@ -83,19 +87,27 @@ export class Battle {
   itemOf(id: string) { return this.p.items.find((i) => i.id === id); }
 
   snap(): Snapshot {
-    const mk = (arr: number[], team: Mon[]) => arr.map((i) => (i >= 0 ? { i, hp: team[i].hp } : null));
+    const mk = (arr: number[], team: Mon[]) => arr.map((i) => (i >= 0 ? { i, hp: team[i].hp, st: team[i].status ?? 0 } : null));
     return { p: mk(this.pa, this.party), f: mk(this.fa, this.foes) };
   }
 
   // ----- marshaling hacia/desde Rust -----
   private uploadData() {
-    const p = this.p, io = this.e.btIo;
-    if (p.species.length > LIMITS.species || p.moves.length > LIMITS.moves || p.types.length > LIMITS.types) throw new Error("El proyecto supera los límites del motor de combate (128 especies, 256 movimientos, 16 tipos).");
+    const p = this.p, io = this.e.btIo, abilities = p.abilities ?? [];
+    if (p.species.length > LIMITS.species || p.moves.length > LIMITS.moves || p.types.length > LIMITS.types || abilities.length > LIMITS.abilities) throw new Error("El proyecto supera los límites del motor de combate (128 especies, 256 movimientos, 16 tipos, 64 habilidades).");
     let o = 0;
     const put = (...v: number[]) => { for (const x of v) io[o++] = x; };
-    put(p.types.length, p.moves.length, p.species.length);
+    put(p.types.length, p.moves.length, p.species.length, abilities.length);
     for (let a = 0; a < p.types.length; a++) for (let d = 0; d < p.types.length; d++) put(Math.round((p.typeChart[a]?.[d] ?? 1) * 100));
-    for (const m of p.moves) put(m.type, m.category === "special" ? 1 : 0, m.power, m.accuracy);
+    for (const m of p.moves) {
+      const e = m.effect ?? {};
+      put(m.type, m.category === "special" ? 1 : 0, m.power, m.accuracy, e.priority ?? 0,
+        e.status ? STATUS_KINDS.indexOf(e.status.kind) + 1 : 0, e.status?.chance ?? 0,
+        e.stat ? BATTLE_STATS.indexOf(e.stat.stat) : -1, e.stat?.stages ?? 0, e.stat?.target === "foe" ? 1 : 0, e.stat?.chance ?? 100,
+        e.drain ?? 0, e.recoil ?? 0, e.heal ?? 0);
+    }
+    const KIND: Record<string, number> = { immune: 1, absorb: 2, statusImmune: 3, intimidate: 4, pinch: 5, speedBoost: 6 };
+    for (const a of abilities) put(KIND[a.kind] ?? 0, a.kind === "statusImmune" ? STATUS_KINDS.indexOf(a.status ?? "burn") + 1 : (a.type ?? 0), a.amount ?? 0);
     for (const s of p.species) {
       const st = s.stats;
       put(s.types[0] ?? 0, s.types[1] ?? -1, st.hp, st.atk, st.def, st.spa, st.spd, st.spe);
@@ -103,6 +115,7 @@ export class Battle {
       const learn = (s.learnset ?? []).filter((l) => this.mvIdx.has(l.move)).slice(0, LIMITS.learn);
       put(learn.length);
       for (let k = 0; k < LIMITS.learn; k++) put(learn[k]?.level ?? 0, learn[k] ? this.mvIdx.get(learn[k].move)! : 0);
+      put(s.ability ? abilities.findIndex((x) => x.id === s.ability) : -1);
     }
     this.e.btLoadData();
   }
@@ -112,7 +125,7 @@ export class Battle {
     team.slice(0, 6).forEach((m, i) => {
       const mv = m.moves.map((id) => this.mvIdx.get(id)).filter((x): x is number => x !== undefined).slice(0, 4);
       const o = i * MON_STRIDE;
-      io.set([this.spIdx.get(m.species) ?? 0, m.level, m.hp, m.exp, mv.length, mv[0] ?? 0, mv[1] ?? 0, mv[2] ?? 0, mv[3] ?? 0], o);
+      io.set([this.spIdx.get(m.species) ?? 0, m.level, m.hp, m.exp, mv.length, mv[0] ?? 0, mv[1] ?? 0, mv[2] ?? 0, mv[3] ?? 0, m.status ?? 0], o);
     });
     this.e.btLoadTeam(side, Math.min(6, team.length));
   }
@@ -125,7 +138,7 @@ export class Battle {
     team.slice(0, 6).forEach((m, i) => {
       const o = i * MON_STRIDE;
       m.species = this.p.species[io[o]]?.id ?? m.species;
-      m.level = io[o + 1]; m.hp = io[o + 2]; m.exp = io[o + 3];
+      m.level = io[o + 1]; m.hp = io[o + 2]; m.exp = io[o + 3]; m.status = io[o + 9];
       m.moves = Array.from({ length: io[o + 4] }, (_, k) => this.p.moves[io[o + 5 + k]]?.id).filter((x): x is string => !!x);
     });
   }
@@ -154,6 +167,7 @@ export class Battle {
         const def = this.itemOf(a.id);
         const idx = this.p.items.findIndex((i) => i.id === a.id);
         if (!def || (this.opts.inv[a.id] ?? 0) <= 0) this.e.btSetAction(slot, A.noitem, 0, 0);
+        else if (def.kind === "cure") this.e.btSetAction(slot, A.cure, idx, 0);
         else this.e.btSetAction(slot, def.kind === "heal" ? A.heal : A.ball, def.amount, idx);
       }
     });
@@ -188,10 +202,13 @@ export class Battle {
     const mvName = (id: number) => this.p.moves[id]?.name ?? "?";
     const itemName = (i: number) => this.p.items[i]?.name ?? "objeto";
     for (let k = 0; k < n; k++) {
-      const [kind, a, b, c, d] = raw.slice(k * 13, k * 13 + 5);
-      const s = raw.slice(k * 13 + 5, k * 13 + 13);
-      const mk = (hp: number[], team: Mon[]) => [0, 2].slice(0, this.size).map((o) => (hp[o] >= 0 ? { i: hp[o], hp: hp[o + 1] } : null)).map((x) => (x && team[x.i] ? x : null));
-      const snap: Snapshot = { p: mk(s.slice(0, 4), this.party), f: mk(s.slice(4, 8), this.foes) };
+      const [kind, a, b, c, d] = raw.slice(k * EV_STRIDE, k * EV_STRIDE + 5);
+      const s = raw.slice(k * EV_STRIDE + 5, k * EV_STRIDE + 17);
+      const mk = (hp: number[], st: number[], team: Mon[]) => [0, 1].slice(0, this.size).map((k2) => (hp[k2 * 2] >= 0 ? { i: hp[k2 * 2], hp: hp[k2 * 2 + 1], st: st[k2] } : null)).map((x) => (x && team[x.i] ? x : null));
+      const snap: Snapshot = { p: mk(s.slice(0, 4), s.slice(8, 10), this.party), f: mk(s.slice(4, 8), s.slice(10, 12), this.foes) };
+      const abName = (i: number) => this.p.abilities?.[i]?.name ?? "Habilidad";
+      /** Nombre de la criatura de una casilla según la instantánea del evento. */
+      const slotName = (side: number, slot: number) => { const e = (side === 0 ? snap.p : snap.f)[slot]; return e ? (side === 0 ? name(0, e.i) : foeName(e.i)) : "?"; };
       const push = (text: string, sfx?: BattleEvent["sfx"], target?: BattleEvent["target"]) => out.push({ text, snap, sfx, target });
       switch (kind) {
         case E.use: { const who = a === 0 ? name(0, b) : foeName(b); push(`${cap(who)} usa ${mvName(c)}.`); break; }
@@ -233,6 +250,35 @@ export class Battle {
         case E.runFail: push("¡No pudiste escapar!"); break;
         case E.noRun: push("¡No puedes huir de un combate de entrenador!"); break;
         case E.noCatch: push("¡No puedes capturar aquí!"); break;
+        case E.status: {
+          const kindName = STATUS_KINDS[c - 1];
+          const msg = { burn: "se quemó", poison: "fue envenenado", paralysis: "quedó paralizado", sleep: "se durmió", freeze: "fue congelado" }[kindName] ?? "sufre un estado";
+          push(`¡${cap(a === 0 ? name(0, d) : foeName(d))} ${msg}!`, "weak", { side: a === 0 ? "p" : "f", slot: b });
+          break;
+        }
+        case E.stage: {
+          const st = BATTLE_STAT_NAMES[BATTLE_STATS[c]];
+          const who = slotName(a, b);
+          push(d === 0 ? `¡${st} de ${who} no puede cambiar más!` : `¡${st} de ${who} ${d > 0 ? "sube" : "baja"}${Math.abs(d) >= 2 ? " mucho" : ""}!`, d > 0 ? "levelup" : d < 0 ? "weak" : undefined);
+          break;
+        }
+        case E.cant: push(`¡${cap(slotName(a, b))} ${c === 4 ? "está profundamente dormido" : c === 5 ? "está congelado" : "está paralizado: no puede moverse"}!`); break;
+        case E.wake: push(`¡${cap(slotName(a, b))} se despertó!`); break;
+        case E.thaw: push(`¡${cap(slotName(a, b))} se descongeló!`); break;
+        case E.chip: push(`${cap(slotName(a, b))} sufre ${d === 1 ? "por la quemadura" : "por el veneno"}.`, "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.drain: push(`${cap(slotName(a, b))} drena ${c} PS.`, "heal"); break;
+        case E.recoil: push(`${cap(slotName(a, b))} recibe daño de retroceso.`, "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.selfHeal: push(`${cap(slotName(a, b))} recupera ${c} PS.`, "heal"); break;
+        case E.ability: push(`¡${abName(c)} de ${slotName(a, b)} se activa!`); break;
+        case E.immune: push(`${cap(slotName(a, b))} es inmune gracias a ${abName(c)}.`, "weak"); break;
+        case E.absorb: push(`¡${abName(d)} de ${slotName(a, b)} absorbe el ataque y recupera ${c} PS!`, "heal"); break;
+        case E.cure: {
+          const id = this.p.items[b]?.id;
+          if (id) this.opts.inv[id] = (this.opts.inv[id] ?? 1) - 1;
+          push(`${name(0, a)} se cura del estado alterado con ${itemName(b)}.`, "heal");
+          break;
+        }
+        case E.noEffect: push("No tendría ningún efecto."); break;
       }
     }
     return out;

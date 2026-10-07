@@ -1,6 +1,6 @@
 import { h } from "../dom";
 import { ATLAS_COLS, ATLAS_ROWS, TILE, createAtlas } from "../tiles";
-import { STAT_KEYS, type Move, type Project, type Species, uniqueId } from "../project";
+import { BATTLE_STATS, BATTLE_STAT_NAMES, STATUS_KINDS, STATUS_NAMES, STAT_KEYS, type AbilityDef, type BattleStat, type Move, type Project, type Species, type StatusKind, uniqueId } from "../project";
 import { importImage, speciesImage } from "../sprites";
 import { movesFromCsv, movesToCsv, speciesFromCsv, speciesToCsv } from "../csv";
 
@@ -50,6 +50,8 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
           h("option", { value: "", selected: s.types.length < 2 }, "—"), ...p.types.map((t, i) => h("option", { value: i, selected: s.types[1] === i }, t)))),
         ...STAT_KEYS.map((k) => h("td", {}, num(s.stats[k], (n) => (s.stats[k] = n), 1, 255))),
         h("td", {}, txt(s.moves.join(", "), (v) => (s.moves = v.split(",").map((x) => x.trim()).filter(Boolean)))),
+        h("td", {}, h("select", { onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) s.ability = v; else delete s.ability; onChange(); } },
+          h("option", { value: "" }, "—"), ...(p.abilities ?? []).map((a) => h("option", { value: a.id, selected: s.ability === a.id }, a.name)))),
         h("td", { class: "nw" }, "Nv.", num(s.evolve?.level ?? 0, (n) => { if (n > 0) s.evolve = { level: n, into: s.evolve?.into ?? p.species[0].id }; else delete s.evolve; }, 0, 100),
           h("select", { onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) s.evolve = { level: s.evolve?.level || 16, into: v }; else delete s.evolve; onChange(); render(); } },
             h("option", { value: "" }, "no evoluciona"), ...p.species.filter((x) => x !== s).map((x) => h("option", { value: x.id, selected: s.evolve?.into === x.id }, x.name)))),
@@ -92,13 +94,44 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
       return h("span", {}, h("button", { onclick: () => f.click() }, label), f);
     };
 
+    // Efectos de movimientos (por datos)
+    const eff = (m: Move) => (m.effect ??= {});
+    const clean = (m: Move) => { const e = m.effect; if (e && !e.priority && !e.status && !e.stat && !e.drain && !e.recoil && !e.heal) delete m.effect; };
+    const fxRows = p.moves.map((m) => h("tr", {},
+      h("td", {}, h("b", {}, m.name)),
+      h("td", {}, num(m.effect?.priority ?? 0, (n) => { eff(m).priority = n || undefined; clean(m); }, -3, 3)),
+      h("td", { class: "nw" }, h("select", { onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) eff(m).status = { kind: v as StatusKind, chance: m.effect?.status?.chance ?? 100 }; else delete eff(m).status; clean(m); onChange(); render(); } },
+        h("option", { value: "" }, "—"), ...STATUS_KINDS.map((k) => h("option", { value: k, selected: m.effect?.status?.kind === k }, STATUS_NAMES[k]))),
+        m.effect?.status ? num(m.effect.status.chance, (n) => (m.effect!.status!.chance = n), 0, 100) : "", m.effect?.status ? "%" : ""),
+      h("td", { class: "nw" }, h("select", { onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) eff(m).stat = { stat: v as BattleStat, stages: m.effect?.stat?.stages ?? 1, target: m.effect?.stat?.target ?? "self", chance: m.effect?.stat?.chance ?? 100 }; else delete eff(m).stat; clean(m); onChange(); render(); } },
+        h("option", { value: "" }, "—"), ...BATTLE_STATS.map((k) => h("option", { value: k, selected: m.effect?.stat?.stat === k }, BATTLE_STAT_NAMES[k]))),
+        ...(m.effect?.stat ? [num(m.effect.stat.stages, (n) => (m.effect!.stat!.stages = n), -6, 6),
+          h("select", { onchange: (e: Event) => { m.effect!.stat!.target = (e.target as HTMLSelectElement).value as "self" | "foe"; onChange(); } }, h("option", { value: "self", selected: m.effect.stat.target === "self" }, "usuario"), h("option", { value: "foe", selected: m.effect.stat.target === "foe" }, "rival")),
+          num(m.effect.stat.chance, (n) => (m.effect!.stat!.chance = n), 0, 100), "%"] : [])),
+      h("td", {}, num(m.effect?.drain ?? 0, (n) => { eff(m).drain = n || undefined; clean(m); }, 0, 100)),
+      h("td", {}, num(m.effect?.recoil ?? 0, (n) => { eff(m).recoil = n || undefined; clean(m); }, 0, 100)),
+      h("td", {}, num(m.effect?.heal ?? 0, (n) => { eff(m).heal = n || undefined; clean(m); }, 0, 100)),
+    ));
+
+    // Habilidades
+    const abKinds: [AbilityDef["kind"], string][] = [["pinch", "Potencia con pocos PS (tipo)"], ["absorb", "Absorbe un tipo y se cura"], ["immune", "Inmune a un tipo"], ["statusImmune", "Inmune a un estado"], ["intimidate", "Intimidar (baja el Ataque rival)"], ["speedBoost", "Sube la Velocidad cada turno"]];
+    const abRows = (p.abilities ?? []).map((a) => h("tr", {},
+      h("td", {}, txt(a.name, (v) => (a.name = v))),
+      h("td", {}, h("select", { onchange: (e: Event) => { a.kind = (e.target as HTMLSelectElement).value as AbilityDef["kind"]; if (["immune", "absorb", "pinch"].includes(a.kind) && a.type === undefined) a.type = 0; if (a.kind === "statusImmune" && !a.status) a.status = "poison"; onChange(); render(); } }, ...abKinds.map(([k, l]) => h("option", { value: k, selected: a.kind === k }, l)))),
+      h("td", {}, ["immune", "absorb", "pinch"].includes(a.kind) ? typeSel(p, a.type ?? 0, (n) => (a.type = n)) : a.kind === "statusImmune"
+        ? h("select", { onchange: (e: Event) => { a.status = (e.target as HTMLSelectElement).value as StatusKind; onChange(); } }, ...STATUS_KINDS.map((k) => h("option", { value: k, selected: a.status === k }, STATUS_NAMES[k]))) : h("small", { class: "muted" }, "—")),
+      h("td", {}, a.kind === "absorb" ? num(a.amount ?? 25, (n) => (a.amount = n), 0, 100) : h("small", { class: "muted" }, "—")),
+      h("td", {}, txt(a.description ?? "", (v) => (a.description = v))),
+      h("td", {}, h("small", { class: "muted" }, a.id)),
+      h("td", {}, h("button", { class: "danger", onclick: () => { p.abilities = p.abilities.filter((x) => x !== a); for (const sp of p.species) if (sp.ability === a.id) delete sp.ability; onChange(); render(); } }, "✕"))));
+
     // Objetos e inventario
     const itemRows = p.items.map((it) => h("tr", {},
       h("td", {}, txt(it.name, (v) => (it.name = v))),
       h("td", {}, h("small", { class: "muted" }, it.id)),
       h("td", {}, h("select", { onchange: (e: Event) => { it.kind = (e.target as HTMLSelectElement).value as typeof it.kind; onChange(); render(); } },
-        h("option", { value: "heal", selected: it.kind === "heal" }, "Cura PS"), h("option", { value: "ball", selected: it.kind === "ball" }, "Captura"))),
-      h("td", {}, num(it.amount, (n) => (it.amount = n), 0, 999), h("small", { class: "muted" }, it.kind === "heal" ? " PS" : " % extra")),
+        h("option", { value: "heal", selected: it.kind === "heal" }, "Cura PS"), h("option", { value: "cure", selected: it.kind === "cure" }, "Cura estado"), h("option", { value: "ball", selected: it.kind === "ball" }, "Captura"))),
+      h("td", {}, it.kind === "cure" ? h("small", { class: "muted" }, "—") : num(it.amount, (n) => (it.amount = n), 0, 999), h("small", { class: "muted" }, it.kind === "heal" ? " PS" : it.kind === "ball" ? " % extra" : "")),
       h("td", {}, num(p.inventory[it.id] ?? 0, (n) => (p.inventory[it.id] = n), 0, 99)),
       h("td", {}, h("button", { class: "danger", onclick: () => { p.items = p.items.filter((x) => x !== it); delete p.inventory[it.id]; onChange(); render(); } }, "✕"))));
 
@@ -123,7 +156,7 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
       h("h2", {}, "Especies"),
       h("p", { class: "muted" }, "Cada especie usa un sprite original generado por código. Con ⬆ puedes importar tu propia imagen (se guarda solo en tu proyecto, nunca se sube a ningún sitio). Los movimientos se referencian por id."),
       h("div", { class: "scroll" }, h("table", {},
-        h("thead", {}, h("tr", {}, ...["Sprite", "Nombre", "Tipo 1", "Tipo 2", "PS", "Ata", "Def", "AtE", "DeE", "Vel", "Movimientos", "Evolución", "Aprende (nv:mov)", ""].map((t) => h("th", {}, t)))),
+        h("thead", {}, h("tr", {}, ...["Sprite", "Nombre", "Tipo 1", "Tipo 2", "PS", "Ata", "Def", "AtE", "DeE", "Vel", "Movimientos", "Habilidad", "Evolución", "Aprende (nv:mov)", ""].map((t) => h("th", {}, t)))),
         h("tbody", {}, ...spRows))),
       h("div", { class: "row" },
         h("button", { onclick: () => download("especies.csv", speciesToCsv(p)) }, "⬇ Exportar CSV"), csvImport("⬆ Importar CSV", "species")),
@@ -138,6 +171,17 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
       h("h2", {}, "Equipo inicial e inventario"),
       ...partyRows,
       h("button", { disabled: p.party.length >= 6 || !p.species.length, onclick: () => { p.party.push({ species: p.species[0].id, level: 5 }); onChange(); render(); } }, "+ Añadir al equipo"),
+      h("h2", {}, "Efectos de los movimientos"),
+      h("p", { class: "muted" }, "Un movimiento con poder 0 solo aplica sus efectos. Prioridad −3…+3 · estado y cambio de estadística con probabilidad · drenaje/retroceso = % del daño · cura = % de los PS máximos."),
+      h("div", { class: "scroll" }, h("table", {},
+        h("thead", {}, h("tr", {}, ...["Movimiento", "Prioridad", "Estado al rival", "Cambio de estadística (etapas)", "Drenaje %", "Retroceso %", "Cura %"].map((t) => h("th", {}, t)))),
+        h("tbody", {}, ...fxRows))),
+      h("h2", {}, "Habilidades"),
+      h("p", { class: "muted" }, "Se asignan a las especies en la tabla de especies. Son datos: no hay código nuevo por habilidad."),
+      h("div", { class: "scroll" }, h("table", {},
+        h("thead", {}, h("tr", {}, ...["Nombre", "Efecto", "Tipo / estado", "% cura", "Descripción", "Id", ""].map((t) => h("th", {}, t)))),
+        h("tbody", {}, ...abRows))),
+      h("button", { onclick: () => { p.abilities ??= []; p.abilities.push({ id: uniqueId(p.abilities.map((a) => a.id), "habilidad"), name: "Habilidad", kind: "intimidate" }); onChange(); render(); } }, "+ Añadir habilidad"),
       h("h2", {}, "Objetos e inventario inicial"),
       h("div", { class: "scroll" }, h("table", {},
         h("thead", {}, h("tr", {}, ...["Nombre", "Id", "Efecto", "Cantidad del efecto", "Inventario inicial", ""].map((t) => h("th", {}, t)))),

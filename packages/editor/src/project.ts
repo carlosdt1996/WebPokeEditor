@@ -1,12 +1,40 @@
 /** Modelo de datos del proyecto (ver docs/architecture/data-model.md). Todo es dato serializable. */
 import { parseScript } from "./script";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 /** Límites de las tablas del motor de combate (crates/engine-core/src/battle.rs). */
-export const LIMITS = { types: 16, moves: 256, species: 128, learn: 8 } as const;
+export const LIMITS = { types: 16, moves: 256, species: 128, learn: 8, abilities: 64 } as const;
 
 export interface Stats { hp: number; atk: number; def: number; spa: number; spd: number; spe: number }
 export const STAT_KEYS: (keyof Stats)[] = ["hp", "atk", "def", "spa", "spd", "spe"];
+
+export type StatusKind = "burn" | "poison" | "paralysis" | "sleep" | "freeze";
+/** El código numérico en el motor es el índice + 1 (0 = sin estado). */
+export const STATUS_KINDS: StatusKind[] = ["burn", "poison", "paralysis", "sleep", "freeze"];
+export const STATUS_NAMES: Record<StatusKind, string> = { burn: "Quemadura", poison: "Veneno", paralysis: "Parálisis", sleep: "Sueño", freeze: "Congelación" };
+export type BattleStat = "atk" | "def" | "spa" | "spd" | "spe";
+export const BATTLE_STATS: BattleStat[] = ["atk", "def", "spa", "spd", "spe"];
+export const BATTLE_STAT_NAMES: Record<BattleStat, string> = { atk: "Ataque", def: "Defensa", spa: "Ataque Esp.", spd: "Defensa Esp.", spe: "Velocidad" };
+
+/** Efectos de un movimiento, definidos por datos. Un movimiento con poder 0 solo aplica sus efectos. */
+export interface MoveEffect {
+  /** −3…+3: actúa antes (o después) que los demás sin importar la velocidad. */
+  priority?: number;
+  /** Estado alterado sobre el objetivo, con probabilidad (%). */
+  status?: { kind: StatusKind; chance: number };
+  /** Cambio de etapa de una estadística (−6…+6), sobre el usuario o el objetivo, con probabilidad (%). */
+  stat?: { stat: BattleStat; stages: number; target: "self" | "foe"; chance: number };
+  /** % del daño infligido que cura al usuario. */
+  drain?: number;
+  /** % del daño infligido que recibe el usuario. */
+  recoil?: number;
+  /** % de los PS máximos que cura el usuario. */
+  heal?: number;
+}
+
+export type AbilityKind = "immune" | "absorb" | "statusImmune" | "intimidate" | "pinch" | "speedBoost";
+/** Habilidad pasiva. immune/absorb/pinch usan `type`; absorb usa `amount` (% de PS máx. que cura); statusImmune usa `status`. */
+export interface AbilityDef { id: string; name: string; kind: AbilityKind; type?: number; status?: StatusKind; amount?: number; description?: string }
 
 export interface Species {
   id: string; name: string; types: number[]; stats: Stats; moves: string[];
@@ -14,10 +42,12 @@ export interface Species {
   sprite?: string;
   /** Evoluciona al alcanzar `level`. */
   evolve?: { level: number; into: string };
+  /** Id de habilidad (ver `Project.abilities`). */
+  ability?: string;
   /** Movimientos que aprende al subir de nivel. */
   learnset?: { level: number; move: string }[];
 }
-export interface Move { id: string; name: string; type: number; category: "physical" | "special"; power: number; accuracy: number }
+export interface Move { id: string; name: string; type: number; category: "physical" | "special"; power: number; accuracy: number; effect?: MoveEffect }
 
 export type NpcKind = "talk" | "trainer" | "healer" | "script";
 export interface TeamMember { species: string; level: number }
@@ -32,7 +62,7 @@ export interface Npc {
   /** Solo kind "script": ver script.ts. */
   script?: string;
 }
-export interface ItemDef { id: string; name: string; kind: "heal" | "ball"; /** heal: PS que cura. ball: bonus (+%) a la probabilidad de captura. */ amount: number }
+export interface ItemDef { id: string; name: string; kind: "heal" | "ball" | "cure"; /** heal: PS que cura. ball: bonus (+%) a la probabilidad de captura. cure: quita el estado alterado. */ amount: number }
 /** Disparador por casilla: ejecuta un script al pisarla. */
 export interface Trigger { x: number; y: number; name: string; script: string; once: boolean }
 export interface Warp { x: number; y: number; toMap: string; toX: number; toY: number }
@@ -59,6 +89,7 @@ export interface Project {
   maps: GameMap[];
   start: { map: string; x: number; y: number };
   party: TeamMember[];
+  abilities: AbilityDef[];
   items: ItemDef[];
   inventory: Record<string, number>;
   /** Nombres de tipo; el índice es el id de tipo. */
@@ -151,13 +182,21 @@ export function defaultProject(): Project {
     seed: 12345,
     start: { map: "pueblo", x: 11, y: 8 },
     party: [{ species: "flamito", level: 5 }, { species: "hojin", level: 5 }],
+    abilities: [
+      { id: "mar-llamas", name: "Mar de Llamas", kind: "pinch", type: 1, description: "Con pocos PS, sus ataques de Fuego son más potentes." },
+      { id: "absorbe-agua", name: "Absorbe Agua", kind: "absorb", type: 2, amount: 25, description: "Los ataques de Agua lo curan en lugar de dañarlo." },
+      { id: "intimidar", name: "Intimidar", kind: "intimidate", description: "Al entrar, baja el Ataque del rival." },
+      { id: "velocista", name: "Velocista", kind: "speedBoost", description: "Su Velocidad sube cada turno." },
+      { id: "cuerpo-sano", name: "Cuerpo Sano", kind: "statusImmune", status: "poison", description: "No se puede envenenar." },
+    ],
     items: [
       { id: "potion", name: "Poción", kind: "heal", amount: 20 },
       { id: "superpotion", name: "Superpoción", kind: "heal", amount: 60 },
+      { id: "antidoto", name: "Cura Total", kind: "cure", amount: 0 },
       { id: "ball", name: "Bola", kind: "ball", amount: 0 },
       { id: "superball", name: "Superbola", kind: "ball", amount: 20 },
     ],
-    inventory: { ball: 8, potion: 4, superpotion: 1 },
+    inventory: { ball: 8, potion: 4, superpotion: 1, antidoto: 2 },
     maps: [
       mapOf("pueblo", "Pueblo Inicial", town, {
         warps: [
@@ -200,18 +239,25 @@ export function defaultProject(): Project {
       [1, 0.5, 2, 0.5],
     ],
     species: [
-      { id: "flamito", name: "Flamito", types: [1], stats: st(44, 52, 43, 60, 50, 65), moves: ["embestida", "ascua"], evolve: { level: 16, into: "flamaron" }, learnset: [{ level: 8, move: "garra" }] },
-      { id: "flamaron", name: "Flamarón", types: [1], stats: st(64, 80, 63, 85, 70, 85), moves: ["embestida", "ascua"], learnset: [{ level: 20, move: "garra" }] },
-      { id: "hojin", name: "Hojín", types: [3], stats: st(45, 49, 49, 65, 65, 45), moves: ["embestida", "hojaje"] },
-      { id: "aquin", name: "Aquín", types: [2], stats: st(50, 48, 65, 50, 64, 43), moves: ["embestida", "chorro"] },
-      { id: "pelusin", name: "Pelusín", types: [0], stats: st(40, 45, 35, 30, 35, 56), moves: ["embestida"] },
+      { id: "flamito", name: "Flamito", types: [1], stats: st(44, 52, 43, 60, 50, 65), moves: ["embestida", "ascua"], ability: "mar-llamas", evolve: { level: 16, into: "flamaron" }, learnset: [{ level: 8, move: "garra" }, { level: 12, move: "danza" }] },
+      { id: "flamaron", name: "Flamarón", types: [1], stats: st(64, 80, 63, 85, 70, 85), moves: ["embestida", "ascua"], ability: "mar-llamas", learnset: [{ level: 20, move: "garra" }, { level: 24, move: "cabezazo" }] },
+      { id: "hojin", name: "Hojín", types: [3], stats: st(45, 49, 49, 65, 65, 45), moves: ["embestida", "hojaje"], ability: "cuerpo-sano", learnset: [{ level: 5, move: "somnifero" }, { level: 8, move: "polvo-venenoso" }, { level: 10, move: "absorbe" }] },
+      { id: "aquin", name: "Aquín", types: [2], stats: st(50, 48, 65, 50, 64, 43), moves: ["embestida", "chorro"], ability: "absorbe-agua", learnset: [{ level: 6, move: "ataque-rapido" }, { level: 12, move: "respiro" }] },
+      { id: "pelusin", name: "Pelusín", types: [0], stats: st(40, 45, 35, 30, 35, 56), moves: ["embestida"], ability: "velocista", learnset: [{ level: 4, move: "ataque-rapido" }, { level: 9, move: "danza" }] },
     ],
     moves: [
       { id: "embestida", name: "Embestida", type: 0, category: "physical", power: 40, accuracy: 100 },
-      { id: "ascua", name: "Ascua", type: 1, category: "special", power: 40, accuracy: 100 },
+      { id: "ascua", name: "Ascua", type: 1, category: "special", power: 40, accuracy: 100, effect: { status: { kind: "burn", chance: 10 } } },
       { id: "hojaje", name: "Hojaje", type: 3, category: "physical", power: 55, accuracy: 95 },
       { id: "chorro", name: "Chorro", type: 2, category: "special", power: 40, accuracy: 100 },
       { id: "garra", name: "Garra", type: 0, category: "physical", power: 70, accuracy: 95 },
+      { id: "somnifero", name: "Somnífero", type: 3, category: "special", power: 0, accuracy: 75, effect: { status: { kind: "sleep", chance: 100 } } },
+      { id: "polvo-venenoso", name: "Polvo Venenoso", type: 3, category: "special", power: 0, accuracy: 75, effect: { status: { kind: "poison", chance: 100 } } },
+      { id: "absorbe", name: "Absorbe", type: 3, category: "special", power: 40, accuracy: 100, effect: { drain: 50 } },
+      { id: "ataque-rapido", name: "Ataque Rápido", type: 0, category: "physical", power: 40, accuracy: 100, effect: { priority: 1 } },
+      { id: "danza", name: "Danza Espada", type: 0, category: "physical", power: 0, accuracy: 100, effect: { stat: { stat: "atk", stages: 2, target: "self", chance: 100 } } },
+      { id: "cabezazo", name: "Cabezazo", type: 0, category: "physical", power: 90, accuracy: 90, effect: { recoil: 25 } },
+      { id: "respiro", name: "Respiro", type: 0, category: "special", power: 0, accuracy: 100, effect: { heal: 50 } },
     ],
   };
 }
@@ -239,6 +285,10 @@ export function migrate(input: unknown): Project {
     p.inventory = { ball: p.inventory?.ball ?? 5, potion: p.inventory?.potion ?? 3 };
     p.schemaVersion = 3;
   }
+  if (p.schemaVersion === 3) {
+    p.abilities = [];
+    p.schemaVersion = 4;
+  }
   return p as Project;
 }
 
@@ -255,6 +305,7 @@ export function validate(p: Project): string[] {
   if (!p.maps.length) errs.push("El proyecto no tiene mapas");
   if (p.species.length > LIMITS.species) errs.push(`Demasiadas especies (máximo ${LIMITS.species})`);
   if (p.moves.length > LIMITS.moves) errs.push(`Demasiados movimientos (máximo ${LIMITS.moves})`);
+  if ((p.abilities?.length ?? 0) > LIMITS.abilities) errs.push(`Demasiadas habilidades (máximo ${LIMITS.abilities})`);
   if (p.types.length > LIMITS.types) errs.push(`Demasiados tipos (máximo ${LIMITS.types})`);
   for (const sp of p.species) if ((sp.learnset?.length ?? 0) > LIMITS.learn) errs.push(`${sp.name}: máximo ${LIMITS.learn} movimientos por nivel`);
   if (mapIds.size !== p.maps.length) errs.push("Ids de mapa duplicados");
@@ -300,13 +351,28 @@ export function validate(p: Project): string[] {
       else if (w.toX >= dest.w || w.toY >= dest.h) errs.push(`${m.name}: salto fuera del mapa destino "${dest.name}"`);
     }
   }
+  const abilityIds = new Set((p.abilities ?? []).map((a) => a.id));
+  if (abilityIds.size !== (p.abilities ?? []).length) errs.push("Ids de habilidad duplicados");
+  for (const a of p.abilities ?? []) {
+    if ((a.kind === "immune" || a.kind === "absorb" || a.kind === "pinch") && !(a.type !== undefined && a.type >= 0 && a.type < p.types.length)) errs.push(`Habilidad ${a.name}: tipo inválido`);
+    if (a.kind === "statusImmune" && !a.status) errs.push(`Habilidad ${a.name}: falta el estado`);
+  }
   for (const s of p.species) {
+    if (s.ability && !abilityIds.has(s.ability)) errs.push(`${s.name}: habilidad inexistente "${s.ability}"`);
     for (const t of s.types) if (t < 0 || t >= p.types.length) errs.push(`${s.name}: tipo inválido`);
     for (const m of s.moves) if (!moveIds.has(m)) errs.push(`${s.name}: movimiento inexistente "${m}"`);
     for (const l of s.learnset ?? []) if (!moveIds.has(l.move)) errs.push(`${s.name}: aprende un movimiento inexistente "${l.move}"`);
     if (s.evolve && !speciesIds.has(s.evolve.into)) errs.push(`${s.name}: evoluciona a una especie inexistente "${s.evolve.into}"`);
   }
-  for (const m of p.moves) if (m.type < 0 || m.type >= p.types.length) errs.push(`${m.name}: tipo inválido`);
+  for (const m of p.moves) {
+    if (m.type < 0 || m.type >= p.types.length) errs.push(`${m.name}: tipo inválido`);
+    const e = m.effect;
+    if (e) {
+      if (e.priority !== undefined && (e.priority < -3 || e.priority > 3)) errs.push(`${m.name}: la prioridad va de −3 a +3`);
+      if (e.stat && (e.stat.stages < -6 || e.stat.stages > 6)) errs.push(`${m.name}: el cambio de estadística va de −6 a +6`);
+      for (const [k, v] of [["drenaje", e.drain], ["retroceso", e.recoil], ["curación", e.heal], ["prob. de estado", e.status?.chance], ["prob. de estadística", e.stat?.chance]] as const) if (v !== undefined && (v < 0 || v > 100)) errs.push(`${m.name}: ${k} fuera de 0–100`);
+    }
+  }
   if (p.typeChart.length !== p.types.length || p.typeChart.some((r) => r.length !== p.types.length)) errs.push("typeChart no coincide con los tipos");
   return errs;
 }

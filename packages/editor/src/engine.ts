@@ -33,6 +33,7 @@ interface Exports {
   vm_var_set(id: number, v: number): void;
   bt_io_ptr(): number;
   bt_events_ptr(): number;
+  bt_event_count(): number;
   bt_load_data(): void;
   bt_load_team(side: number, n: number): void;
   bt_read_team(side: number): void;
@@ -78,9 +79,10 @@ export class Engine {
 
   // ----- Combate (Rust): búfer de enteros compartido -----
   static readonly BT_IO = 8192;
-  static readonly EV_STRIDE = 13;
+  static readonly EV_STRIDE = 17;
   /** Búfer de entrada/salida del combate (vista directa; no la guardes entre llamadas). */
   get btIo(): Int32Array { return new Int32Array(this.x.memory.buffer, this.x.bt_io_ptr(), Engine.BT_IO); }
+  btEventCount() { return this.x.bt_event_count(); }
   btEvents(n: number): Int32Array { return new Int32Array(this.x.memory.buffer, this.x.bt_events_ptr(), n * Engine.EV_STRIDE); }
   btLoadData() { this.x.bt_load_data(); }
   btLoadTeam(side: number, n: number) { this.x.bt_load_team(side, n); }

@@ -11,13 +11,13 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
   const root = h("div", { class: `battle size${b.size}` });
   host.append(root);
 
-  interface Side { img: HTMLImageElement; name: HTMLElement; lv: HTMLElement; fill: HTMLElement; num: HTMLElement; el: HTMLElement }
+  interface Side { img: HTMLImageElement; name: HTMLElement; lv: HTMLElement; fill: HTMLElement; num: HTMLElement; badge: HTMLElement; el: HTMLElement }
   const mkSide = (cls: string, slot: number): Side => {
     const img = h("img", { class: `mon ${cls} s${slot}` });
-    const name = h("b"), lv = h("span"), fill = h("div", { class: "hp" }), num = h("small");
-    const el = h("div", { class: `plate ${cls}plate s${slot}` }, h("div", {}, name, lv), h("div", { class: "hpbar" }, fill), num);
+    const name = h("b"), lv = h("span"), fill = h("div", { class: "hp" }), num = h("small"), badge = h("em", { class: "badge" });
+    const el = h("div", { class: `plate ${cls}plate s${slot}` }, h("div", {}, name, lv, badge), h("div", { class: "hpbar" }, fill), num);
     root.append(img, el);
-    return { img, name, lv, fill, num, el };
+    return { img, name, lv, fill, num, badge, el };
   };
   const fs = Array.from({ length: b.size }, (_, i) => mkSide("foe", i));
   const ps = Array.from({ length: b.size }, (_, i) => mkSide("pl", i));
@@ -26,7 +26,7 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
   root.append(msg, menu);
 
   const apply = (s: Snapshot) => {
-    const upd = (sd: Side, e: { i: number; hp: number } | null, team: typeof b.party, self: boolean) => {
+    const upd = (sd: Side, e: { i: number; hp: number; st: number } | null, team: typeof b.party, self: boolean) => {
       sd.el.style.visibility = e ? "visible" : "hidden";
       if (!e) { sd.img.classList.add("fainted"); return; }
       const m = team[e.i], max = monMaxHp(p, m), pct = Math.max(0, (e.hp / max) * 100);
@@ -35,6 +35,8 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
       sd.fill.style.width = pct + "%";
       sd.fill.style.background = pct > 50 ? "#4caf50" : pct > 20 ? "#ffb300" : "#e53935";
       sd.num.textContent = self ? `${Math.ceil(e.hp)} / ${max}` : "";
+      sd.badge.textContent = ["", "QUE", "VEN", "PAR", "DOR", "CON"][e.st] ?? "";
+      sd.badge.className = `badge st${e.st}`;
       const k = m.species + (e.hp <= 0 ? "x" : "");
       if (sd.img.dataset.k !== k) { sd.img.src = speciesImage(p, m.species); sd.img.dataset.k = k; }
       sd.img.classList.toggle("fainted", e.hp <= 0);
@@ -113,6 +115,7 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
   await say(b.isTrainer ? `¡${b.opts.trainer} quiere combatir!` : `¡Un ${monName(p, b.foe)} salvaje apareció!`, 1200);
   if (b.size > 1) await say("¡Es un combate doble!", 800);
   await say(`¡Adelante, ${b.pa.filter((i) => i >= 0).map((i) => monName(p, b.party[i])).join(" y ")}!`, 700);
+  await play(b.startEvents);
 
   while (!b.result) {
     if (b.awaitingSwitch) {

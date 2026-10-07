@@ -17,7 +17,7 @@ Leyenda: `[x]` hecho · `[~]` parcial (MVP) · `[ ]` pendiente
 ## Fase 2 — Jugabilidad base
 - [x] Movimiento del jugador en grid, colisiones, warps
 - [x] Diálogos y menús de combate
-- [x] Eventos por NPC y por casilla con scripts (variables, bucles, condicionales) en una VM en Rust
+- [x] Eventos por NPC, por casilla y al entrar al mapa con scripts (variables, bucles, funciones, menús) en una VM en Rust
 - [x] Modo "Probar" dentro del editor
 
 ## Fase 3 — Datos Pokémon
@@ -28,7 +28,7 @@ Leyenda: `[x]` hecho · `[~]` parcial (MVP) · `[ ]` pendiente
 
 ## Fase 4 — Combate
 - [x] Combate determinista 1v1 y 2v2 jugable, simulado en Rust (ver battle-system.md)
-- [ ] Habilidades, estados alterados y efectos de movimientos mediante datos + scripts
+- [x] Habilidades, estados alterados y efectos de movimientos mediante datos
 - [~] UI de combate (animaciones básicas)
 
 ## Fase 5 — Exportación y comunidad

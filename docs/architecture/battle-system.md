@@ -28,5 +28,10 @@ La simulación está en **Rust** (`crates/engine-core/src/battle.rs`), con sopor
 - **Turno**: el host fija una acción por casilla (`bt_set_action`: mover+objetivo, cambiar, curar, bola, huir) y llama a `bt_turn`. Rust ordena (cambios/objetos antes que ataques; luego velocidad; desempate con el RNG), ejecuta, reparte experiencia, sube de nivel, aprende movimientos y evoluciona.
 - **Salida**: una lista de eventos numéricos (`E_USE`, `E_HIT`, `E_FAINT`, `E_EXP`…), cada uno con una instantánea de los PS en pantalla. `packages/editor/src/battle.ts` los traduce a texto en español y refleja el estado final en los objetos `Mon` de JS.
 - Comparte el RNG determinista con el mundo: misma semilla + mismas acciones = mismo combate.
-- Límites: 16 tipos, 256 movimientos, 128 especies, 8 movimientos por nivel por especie (el proyecto lo valida).
-Un entrenador con `double: true` activa el modo doble si ambos lados tienen 2+ criaturas en pie. Pendiente: habilidades, estados alterados, efectos de movimientos por datos.
+- **Efectos por datos** (sin código nuevo por movimiento o habilidad):
+  - *Movimientos* (`Move.effect`): prioridad −3…+3, estado alterado con probabilidad (quemadura, veneno, parálisis, sueño, congelación), cambio de etapa de una estadística (−6…+6) sobre el usuario o el rival con probabilidad, drenaje, retroceso y curación. Poder 0 = movimiento de estado (solo efectos; si nada surte efecto, «¡Pero falló!»).
+  - *Estados*: quemadura (1/16 de PS por turno y ataque físico a la mitad), veneno (1/8), parálisis (velocidad a la mitad y 25 % de no moverse), sueño (1–3 turnos), congelación (20 % de descongelarse por turno). El estado persiste entre combates hasta curarlo (Cura Total o curandero); dormir o congelar facilita la captura.
+  - *Etapas*: modificadores −6…+6 de ataque, defensa, ataque/defensa especial y velocidad; se reinician al cambiar de criatura o al terminar el combate.
+  - *Habilidades* (`Project.abilities`, asignadas en `Species.ability`): `pinch` (×1,5 de potencia de un tipo con ≤ 1/3 de PS), `absorb` (un tipo cura en vez de dañar), `immune`, `statusImmune`, `intimidate` (baja el ataque rival al entrar) y `speedBoost` (+1 de velocidad por turno).
+- Límites: 16 tipos, 256 movimientos, 128 especies, 64 habilidades, 8 movimientos por nivel por especie (el proyecto lo valida).
+Un entrenador con `double: true` activa el modo doble si ambos lados tienen 2+ criaturas en pie. Pendiente: clima y terreno, objetos equipables, movimientos multigolpe/de varios turnos, precisión/evasión y golpes críticos por etapas.

@@ -14,3 +14,6 @@ Mantener TS (más simple, pero la lógica no sería portable); un crate/`.wasm` 
 
 ## Consecuencias
 + Mismo RNG y reglas en cualquier host; + 4 tests de Rust del combate además de los de TS que ya existían (pasaron sin cambios). − El `.wasm` crece (≈154 KB) por el uso de `Vec`; − límites fijos de tablas (16/256/128).
+
+## Actualización: efectos, estados y habilidades
+El mismo protocolo se amplió con efectos de movimientos, estados alterados, etapas y habilidades definidos por datos (tablas de 14 enteros por movimiento y 3 por habilidad; la especie lleva su habilidad). Cada evento lleva ahora una instantánea de índice, PS y **estado** por casilla (17 enteros por evento). Los volátiles del combate (etapas y turnos de sueño) viven solo en Rust, por eso el host sube los equipos en cada turno sin tocarlos.

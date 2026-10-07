@@ -113,3 +113,6 @@ td.nw { white-space: nowrap; }
 .choice { position: absolute; right: 4%; bottom: 26%; background: #fff; color: #111; border: 4px solid #333; border-radius: 10px; padding: 6px; display: grid; gap: 2px; z-index: 6; min-width: 160px; box-shadow: 0 4px 0 rgba(0,0,0,.4); }
 .choice button { background: none; border: none; color: #111; font-size: 16px; font-weight: 600; text-align: left; white-space: pre; padding: 4px 8px; }
 .choice button.sel { background: #ffe082; border-radius: 6px; }
+
+.badge { margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px; font-style: normal; font-weight: 700; color: #fff; }
+.badge:empty { display: none; } .badge.st1 { background: #e65100; } .badge.st2 { background: #8e24aa; } .badge.st3 { background: #f9a825; color: #222; } .badge.st4 { background: #607d8b; } .badge.st5 { background: #29b6f6; color: #222; }

@@ -1,0 +1,3 @@
+# El núcleo guarda su estado en estáticos globales (WASM es de un solo hilo): los tests no pueden ejecutarse en paralelo.
+[env]
+RUST_TEST_THREADS = "1"

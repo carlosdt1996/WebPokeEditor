@@ -183,6 +183,9 @@ await test("recorrer el mundo: puerta → casa → salida → ruta", async () =>
   await holdUntil(page, "ArrowLeft", cell(5, 9));
   await holdUntil(page, "ArrowUp", `(${mapId}) === "casa"`);
   eq(await W(page, () => window.__wpe.view.game.map.id), "casa", "entró en la casa");
+  await page.waitForSelector(".dialog:not([hidden])");
+  assert((await page.textContent(".dialog")).includes("Has vuelto a casa"), "script al entrar al mapa: " + (await page.textContent(".dialog")));
+  await closeDialog(page);
   await shot(page, "02-casa");
   await holdUntil(page, "ArrowDown", `(${mapId}) === "pueblo"`);
   eq(await W(page, () => window.__wpe.view.game.map.id), "pueblo", "salió al pueblo");
@@ -229,6 +232,50 @@ await test("disparador por casilla: contador de visitas con variables y {interpo
   assert((await page.textContent(".dialog")).includes("2 veces"), "segunda visita: " + (await page.textContent(".dialog")));
   eq(await W(page, () => window.__wpe.engine.getVar("visitas")), 2, "variable en la VM de Rust");
   await closeDialog(page);
+});
+
+await test("menú de elección, funciones y texto en un disparador (VM de Rust)", async () => {
+  await W(page, () => window.__wpe.view.game.warpTo("pueblo", 11, 13));
+  await W(page, () => window.__wpe.project.maps[0].triggers.push({ x: 11, y: 14, name: "Prueba", once: false, script: "def dime\nsay Elegiste {opcion}\nend\nchoice Rojo | Azul | Verde\nsetstr opcion Azul\nif choice == 1\ncall dime\nelse\nsay otra\nend" }));
+  await page.waitForTimeout(200);
+  await holdUntil(page, "ArrowDown", cell(11, 14));
+  await page.waitForSelector(".choice");
+  assert((await page.locator(".choice button").count()) === 3, "tres opciones");
+  await key(page, "ArrowDown", 80); await key(page, "Enter", 80);
+  await page.waitForSelector(".dialog:not([hidden])");
+  assert((await page.textContent(".dialog")).includes("Elegiste Azul"), "tras elegir: " + (await page.textContent(".dialog")));
+  eq(await W(page, () => window.__wpe.engine.getVar("choice")), 1, "variable choice");
+  await closeDialog(page);
+  await W(page, () => window.__wpe.project.maps[0].triggers.pop());
+});
+
+await test("combate: el estado Sueño se muestra como insignia y los efectos funcionan en la interfaz", async () => {
+  await W(page, () => {
+    const g = window.__wpe.view.game;
+    g.party.length = 0;
+    g.party.push({ species: "hojin", level: 30, hp: 999, exp: 1, moves: ["somnifero", "embestida"], status: 0 });
+    g.fight([{ species: "pelusin", level: 3, hp: 30, exp: 1, moves: ["embestida"], status: 0 }]);
+  });
+  await page.waitForSelector(".battle");
+  let badge = false;
+  for (let i = 0; i < 12 && !badge; i++) {
+    const fight = page.locator(".menu button:has-text('Luchar')");
+    if (await fight.count()) { await fight.click(); await page.locator(".menu button").first().click(); }
+    await page.waitForTimeout(250);
+    await page.locator(".battle").click({ position: { x: 20, y: 20 } }).catch(() => {});
+    badge = (await page.locator(".fplate .badge.st4").count()) > 0;
+  }
+  assert(badge, "la insignia DOR del rival no apareció");
+  await shot(page, "09-combate-sueno");
+  for (let i = 0; i < 60 && (await page.locator(".battle").count()); i++) {
+    const fight = page.locator(".menu button:has-text('Luchar')");
+    if (await fight.count()) { await fight.click(); await page.locator(".menu button").nth(1).click(); }
+    await page.waitForTimeout(150);
+    await page.locator(".battle").click({ position: { x: 20, y: 20 } }).catch(() => {});
+  }
+  assert(!(await page.locator(".battle").count()), "el combate no terminó");
+  await W(page, () => { const g = window.__wpe.view.game; g.party.length = 0; g.party.push({ species: "flamito", level: 20, hp: 999, exp: 1, moves: ["embestida", "ascua"], status: 0 }, { species: "hojin", level: 20, hp: 999, exp: 1, moves: ["embestida", "hojaje"], status: 0 }); });
+  await W(page, () => window.__wpe.view.game.party.forEach((m) => { m.hp = 60; }));
 });
 
 await test("NPC de conversación y curandero", async () => {
@@ -436,6 +483,27 @@ await test("PWA: manifest, service worker y funcionamiento sin conexión", async
   // "in-incognito" lo causa el contexto efímero de Playwright, no la app; cualquier otro motivo sí es un fallo real
   const real = inst.installabilityErrors.filter((e) => e.errorId !== "in-incognito");
   assert(real.length === 0, "la PWA no es instalable: " + JSON.stringify(real));
+});
+
+await test("editor: habilidades, efectos de movimientos y script al entrar al mapa", async () => {
+  if (await page.locator("text=■ Detener").count()) await page.click("text=■ Detener");
+  await page.click("button:has-text('📋 Datos')");
+  eq(await W(page, () => window.__wpe.project.species.find((s) => s.id === "flamito").ability), "mar-llamas", "habilidad por defecto");
+  assert(await page.locator("h2:has-text('Habilidades')").count() === 1 && await page.locator("h2:has-text('Efectos de los movimientos')").count() === 1, "secciones nuevas");
+  const n0 = await W(page, () => window.__wpe.project.abilities.length);
+  await page.click("button:has-text('+ Añadir habilidad')");
+  eq(await W(page, () => window.__wpe.project.abilities.length), n0 + 1, "habilidad añadida");
+  await W(page, () => { window.__wpe.project.abilities.pop(); });
+  await page.click("button:has-text('🗺️ Mapa')");
+  await W(page, () => window.__wpe.view.switchMap(1));
+  await page.waitForTimeout(200);
+  assert((await page.locator(".side textarea.code").first().inputValue()).includes("mama_saluda"), "el script de entrada de la casa se muestra");
+  await page.locator(".side textarea.code").first().fill("say hola");
+  eq(await W(page, () => window.__wpe.view.map.onEnter), "say hola", "se guarda en el mapa");
+  await page.locator(".side textarea.code").first().fill("");
+  eq(await W(page, () => window.__wpe.view.map.onEnter), undefined, "vacío = sin script");
+  await page.locator(".side textarea.code").first().fill("if mama_saluda\nreturn\nend\nflag mama_saluda\nsay (Mamá) ¡Has vuelto a casa!");
+  await W(page, () => window.__wpe.view.switchMap(0));
 });
 
 await test("modo 3D en edición y en juego (WebGPU), girando la cámara", async () => {

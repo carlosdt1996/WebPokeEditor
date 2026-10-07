@@ -18,7 +18,7 @@ Por `id`, nunca por índice, para permitir reordenar y mods. El *validator* en `
 ## Migraciones
 Cada cambio de esquema incrementa `schemaVersion` e incluye migración + test.
 
-## Estado actual (schemaVersion 3)
-`Project`: `maps[]`, `start`, `party[]`, `items[]` + `inventory` (por id), `types`/`typeChart`, `species[]` (con `sprite?`, `evolve?`, `learnset?`), `moves[]` y `atlas?`.
-`GameMap`: `tiles` (suelo), `objects?` (capa superior, 0 = vacío; ids ≥ 12), `heights?` (Int8+128, unidades de 0,25 tiles), `npcs[]` (con `kind: talk|trainer|healer|script`, `double?`, `script?`), `warps[]`, `encounters[]`, `encounterLevel`.
-Migraciones en `migrate()` (v1→v2→v3) con tests.
+## Estado actual (schemaVersion 4)
+`Project`: `maps[]`, `start`, `party[]`, `items[]` (curar PS, curar estado o capturar) + `inventory` (por id), `types`/`typeChart`, `abilities[]`, `species[]` (con `sprite?`, `evolve?`, `learnset?`, `ability?`), `moves[]` (con `effect?`) y `atlas?`.
+`GameMap`: `tiles` (suelo), `objects?` (capa superior, 0 = vacío; ids ≥ 12), `heights?` (Int8+128, unidades de 0,25 tiles), `npcs[]` (con `kind: talk|trainer|healer|script`, `double?`, `script?`), `warps[]`, `triggers[]` (script por casilla), `onEnter?` (script al entrar al mapa), `encounters[]`, `encounterLevel`.
+Migraciones en `migrate()` (v1→v2→v3→v4) con tests.

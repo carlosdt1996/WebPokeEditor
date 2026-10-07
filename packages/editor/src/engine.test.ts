@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Engine, Ev, Input } from "./engine";
-import { Battle, makeMon } from "./battle";
+import { Battle, healAll, makeMon } from "./battle";
 import { movesFromCsv, movesToCsv, parseCsv, speciesFromCsv, speciesToCsv, toCsv } from "./csv";
 import { parseScript, runScript } from "./script";
 import { decodeTiles, defaultProject, effectiveness, encodeTiles, migrate, parseProject, validate } from "./project";
@@ -62,10 +62,12 @@ describe("project", () => {
 
 describe("migración de esquema", () => {
   it("v2 → v3 añade objetos genéricos conservando el inventario", () => {
-    const v2 = { ...defaultProject(), schemaVersion: 2, inventory: { ball: 7, potion: 2 } } as Record<string, unknown>;
+    const base = defaultProject();
+    const v2 = { ...base, schemaVersion: 2, inventory: { ball: 7, potion: 2 }, species: base.species.map((sp) => ({ ...sp, ability: undefined })) } as Record<string, unknown>;
     delete v2.items;
+    delete v2.abilities;
     const p = migrate(v2);
-    expect(p.schemaVersion).toBe(3);
+    expect(p.schemaVersion).toBe(4);
     expect(p.inventory).toEqual({ ball: 7, potion: 2 });
     expect(p.items.length).toBe(2);
     expect(validate(p)).toEqual([]);
@@ -80,7 +82,8 @@ describe("migración de esquema", () => {
       encounters: ["a"],
     };
     const p = migrate(v1);
-    expect(p.schemaVersion).toBe(3);
+    expect(p.schemaVersion).toBe(4);
+    expect(p.abilities).toEqual([]);
     expect(p.items.map((i) => i.id)).toEqual(["potion", "ball"]);
     expect(p.maps).toHaveLength(1);
     expect(p.maps[0]).toMatchObject({ w: 4, h: 3, encounters: ["a"] });
@@ -284,6 +287,80 @@ describe("capa de objetos y colisiones", () => {
     expect(e.walkable(3, 1)).toBe(true);
     e.loadMap(5, 5, new Uint8Array(25), 1, new Uint8Array(25).fill(15));
     expect(e.walkable(0, 0)).toBe(false);
+  });
+});
+
+describe("combate: estados, etapas, habilidades y efectos de movimientos", () => {
+  const texts = (evs: { text: string }[]) => evs.map((e) => e.text);
+  it("un movimiento de sueño duerme al rival, el estado persiste en la criatura y healAll lo quita", async () => {
+    const e = await Engine.load(wasm());
+    e.reset(8, 8, 3);
+    const p = defaultProject();
+    const me = makeMon(p, "hojin", 20), foe = makeMon(p, "pelusin", 5);
+    me.moves = ["somnifero"];
+    const b = new Battle(p, e, [me], [foe], { trainer: "T", inv: {} });
+    let all: string[] = [];
+    for (let i = 0; i < 6 && !foe.status; i++) all = all.concat(texts(b.turn({ kind: "move", index: 0 })));
+    expect(foe.status).toBe(4); // sueño
+    expect(all.some((t) => t.includes("se durmió"))).toBe(true);
+    expect(b.snap().f[0]?.st).toBe(4);
+    healAll(p, [foe]);
+    expect(foe.status).toBe(0);
+  });
+  it("habilidad Intimidar al entrar, cambios de etapa y movimientos con retroceso/drenaje/prioridad", async () => {
+    const e = await Engine.load(wasm());
+    e.reset(8, 8, 9);
+    const p = defaultProject();
+    p.species.find((s) => s.id === "pelusin")!.ability = "intimidar";
+    const me = makeMon(p, "flamito", 30), foe = makeMon(p, "pelusin", 30);
+    me.moves = ["cabezazo", "absorbe", "ataque-rapido", "danza"];
+    const b = new Battle(p, e, [me], [foe], { trainer: "T", inv: {} });
+    const start = texts(b.startEvents);
+    expect(start.some((t) => t.includes("Intimidar") && t.includes("se activa"))).toBe(true);
+    expect(start.some((t) => t.includes("Ataque de Flamito baja"))).toBe(true);
+    const recoil = texts(b.turn({ kind: "move", index: 0 }));
+    expect(recoil.some((t) => t.includes("retroceso"))).toBe(true);
+    const dance = texts(b.turn({ kind: "move", index: 3 }));
+    expect(dance.some((t) => t.includes("sube mucho"))).toBe(true);
+  });
+  it("Absorbe Agua cura al rival en lugar de dañarlo; las habilidades inexistentes no rompen nada", async () => {
+    const e = await Engine.load(wasm());
+    e.reset(8, 8, 4);
+    const p = defaultProject();
+    const me = makeMon(p, "aquin", 30), foe = makeMon(p, "aquin", 30);
+    foe.hp = 20;
+    const b = new Battle(p, e, [me], [foe], { trainer: "T", inv: {} });
+    const t = texts(b.turn({ kind: "move", index: 1 })); // Chorro (Agua)
+    expect(t.some((x) => x.includes("absorbe el ataque"))).toBe(true);
+    expect(foe.hp).toBeGreaterThan(20);
+    const q = defaultProject();
+    q.species[0].ability = "no-existe";
+    expect(validate(q).some((x) => x.includes("habilidad inexistente"))).toBe(true);
+  });
+  it("Cura Total quita el estado y se consume; sin estado no tiene efecto", async () => {
+    const e = await Engine.load(wasm());
+    e.reset(8, 8, 6);
+    const p = defaultProject();
+    const me = makeMon(p, "flamito", 30), foe = makeMon(p, "pelusin", 3);
+    me.status = 2;
+    const inv = { antidoto: 2 };
+    const b = new Battle(p, e, [me], [foe], { inv });
+    const a = texts(b.turn({ kind: "item", id: "antidoto" }));
+    expect(a.some((x) => x.includes("se cura del estado"))).toBe(true);
+    expect(me.status).toBe(0);
+    expect(inv.antidoto).toBe(1);
+    const c = texts(b.turn({ kind: "item", id: "antidoto" }));
+    expect(c.some((x) => x.includes("ningún efecto"))).toBe(true);
+    expect(inv.antidoto).toBe(1); // no se consume si no hace nada
+  });
+  it("migración v3 → v4 añade la lista de habilidades y los efectos validan rangos", () => {
+    const v3 = { ...defaultProject(), schemaVersion: 3 } as Record<string, unknown>;
+    delete v3.abilities;
+    expect(migrate(v3).abilities).toEqual([]);
+    const p = defaultProject();
+    p.moves[0].effect = { priority: 9, stat: { stat: "atk", stages: 9, target: "self", chance: 100 }, drain: 150 };
+    const errs = validate(p);
+    expect(errs.filter((x) => x.includes("Embestida")).length).toBe(3);
   });
 });
 
