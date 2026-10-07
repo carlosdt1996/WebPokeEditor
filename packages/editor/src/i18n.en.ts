@@ -110,7 +110,7 @@ export const EN: Record<string, string> = {
   "▶ Probar": "▶ Play", "■ Detener": "■ Stop",
   "Vista 3D estilo DS (requiere WebGPU). Q/E giran la cámara; arrastra para orbitar.": "DS-style 3D view (needs WebGPU). Q/E rotate the camera; drag to orbit.",
   "🧊 3D": "🧊 3D",
-  "Herramientas": "Tools", "Tiles": "Tiles", "Vista": "View",
+  "Tiles": "Tiles",
   "Cuadrícula": "Grid", "Mostrar colisiones": "Show collisions", "Mostrar alturas (3D)": "Show heights (3D)", "Centrar mapa": "Center map",
   "Mapas": "Maps", "+ Nuevo": "+ New", "Renombrar": "Rename", "Eliminar": "Delete",
   "Clima en combate": "Battle weather", "Al entrar al mapa": "On entering the map", "Al salir del mapa": "On leaving the map", "Inspector": "Inspector",
@@ -132,6 +132,10 @@ export const EN: Record<string, string> = {
   "Motor: Rust → WASM · Render: ": "Engine: Rust → WASM · Render: ",
   "Listo": "Ready",
   "Bienvenido. Pinta el mapa, coloca NPC y saltos, y pulsa ▶ Probar. Prueba también 🧊 3D.": "Welcome. Paint the map, place NPCs and warps, and press ▶ Play. Try 🧊 3D too.",
+  // paneles estilo Godot
+  "Escena": "Scene", "Sistema de archivos": "FileSystem", "NPC": "NPCs", "Saltos": "Warps", "Disparadores": "Triggers",
+  "Especies": "Species", "Movimientos": "Moves", "Objetos": "Items", "Habilidades": "Abilities", "Proyecto": "Project",
+  "Importa un proyecto (.wpe.json)": "Imports a project (.wpe.json)",
   // juego
   "Entras en {0}.": "You enter {0}.",
   "¡Listo!": "All done!",

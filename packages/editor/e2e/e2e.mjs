@@ -34,7 +34,7 @@ const browser = await chromium.launch({
 });
 const errors = [];
 async function newPage(url = URL_, ctx) {
-  const c = ctx ?? (await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true }));
+  const c = ctx ?? (await browser.newContext({ viewport: { width: 1440, height: 960 }, acceptDownloads: true }));
   const p = await c.newPage();
   p.on("pageerror", (e) => errors.push("PAGEERROR " + e));
   p.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
@@ -46,12 +46,32 @@ async function newPage(url = URL_, ctx) {
 const shot = (p, n) => SHOTS && p.screenshot({ path: join(SHOTS, n + ".png") });
 const W = (p, fn, arg) => p.evaluate(fn, arg);
 const key = (p, k, ms = 60) => p.keyboard.down(k).then(() => p.waitForTimeout(ms)).then(() => p.keyboard.up(k));
-/** Mantiene una tecla pulsada hasta que `cond` (evaluada en la página) sea cierta. */
+/**
+ * Mantiene una tecla pulsada hasta que `cond` (expresión evaluada en la página) sea cierta.
+ * La tecla se suelta dentro de la propia página, en el mismo instante en que se cumple la condición: así no hay latencia de CDP
+ * y el jugador no se pasa de casilla aunque los fotogramas (WebGPU por software) sean lentos.
+ */
 async function holdUntil(p, k, cond, timeout = 8000) {
   await p.keyboard.down(k);
-  try { await p.waitForFunction(cond, null, { timeout, polling: 30 }); }
-  catch (e) { const st = await p.evaluate(() => { const w = window.__wpe; return JSON.stringify({ cell: w?.engine.cell, map: w?.view.game?.map.id, busy: w?.view.game?.busy, dialog: !document.querySelector(".dialog")?.hidden, choice: !!document.querySelector(".choice"), battle: !!document.querySelector(".battle") }); }).catch(() => "?"); throw new Error(`holdUntil(${k}) agotó el tiempo; estado ${st}`); }
-  finally { await p.keyboard.up(k); }
+  try {
+    await p.evaluate(({ cond, k, timeout }) => new Promise((res, rej) => {
+      const test = new Function(`return (${cond});`);
+      const t0 = performance.now();
+      const check = () => {
+        let ok = false;
+        try { ok = !!test(); } catch { /* aún no está listo */ }
+        if (ok) { window.dispatchEvent(new KeyboardEvent("keyup", { code: k })); res(true); return; }
+        if (performance.now() - t0 > timeout) { rej(new Error("timeout")); return; }
+        requestAnimationFrame(check);
+      };
+      check();
+    }), { cond: String(cond), k, timeout });
+  } catch (e) {
+    const st = await p.evaluate(() => { const w = window.__wpe; return JSON.stringify({ cell: w?.engine.cell, map: w?.view.game?.map.id, busy: w?.view.game?.busy, dialog: !document.querySelector(".dialog")?.hidden, choice: !!document.querySelector(".choice"), battle: !!document.querySelector(".battle") }); }).catch(() => "?");
+    await p.keyboard.up(k);
+    throw new Error(`holdUntil(${k}) agotó el tiempo; estado ${st}`);
+  }
+  await p.keyboard.up(k);
   await p.waitForTimeout(250);
 }
 /** Mantiene la tecla hasta que el jugador mira en la dirección `dir` (0 abajo, 1 arriba, 2 izq, 3 der). */
@@ -71,8 +91,13 @@ const mapId = "window.__wpe.view.game && window.__wpe.view.game.map.id";
 const png = (p, w, h) => W(p, ([w, h]) => { const c = document.createElement("canvas"); c.width = w; c.height = h; const g = c.getContext("2d"); g.fillStyle = "#e91e63"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(w / 4, h / 4, w / 2, h / 2); return c.toDataURL("image/png").split(",")[1]; }, [w, h]);
 
 /** Crea un proyecto nuevo con la plantilla del mini mundo de ejemplo. */
+/** Abre el menú «Proyecto» (estilo Godot) y pulsa una de sus opciones. */
+async function menuItem(p, text) {
+  await p.click("header .menu-btn");
+  await p.click(`header .menu-pop button:has-text('${text}')`);
+}
 async function newExample(p) {
-  await p.click("header button:has-text('Nuevo')");
+  await menuItem(p, "Nuevo");
   await p.click(".tpl:has-text('Mini mundo')");
   await p.waitForTimeout(500);
 }
@@ -628,7 +653,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   await page.click("button:has-text('🗺️ Mapa')");
   await page.fill("input.title", "Proyecto E2E");
   await page.waitForTimeout(600);
-  const [dl] = await Promise.all([page.waitForEvent("download"), page.click("button:has-text('Exportar proyecto')")]);
+  const [dl] = await Promise.all([page.waitForEvent("download"), menuItem(page, "Exportar proyecto")]);
   const path = join(tmpdir(), "e2e-proyecto.wpe.json");
   await dl.saveAs(path);
   const json = JSON.parse(readFileSync(path, "utf8"));
@@ -655,7 +680,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
 
 await test("exportar juego a un único .html y jugarlo", async () => {
   page.removeAllListeners("dialog"); page.on("dialog", (d) => d.accept());
-  const [dl] = await Promise.all([page.waitForEvent("download"), page.click("button:has-text('📦 Exportar juego')")]);
+  const [dl] = await Promise.all([page.waitForEvent("download"), menuItem(page, "Exportar juego")]);
   const path = join(tmpdir(), "e2e-juego.html");
   await dl.saveAs(path);
   const html = readFileSync(path, "utf8");
@@ -675,7 +700,7 @@ await test("exportar juego a un único .html y jugarlo", async () => {
 
 await test("región «Archipiélago de la Marea»: plantilla, compañero inicial, puerta, líder de gimnasio y medalla", async () => {
   if (await page.locator("text=■ Detener").count()) await page.click("text=■ Detener");
-  await page.click("header button:has-text('Nuevo')");
+  await menuItem(page, "Nuevo");
   await page.click(".tpl:has-text('Archipiélago')");
   await page.waitForFunction(() => window.__wpe.project.name === "Archipiélago de la Marea", null, { timeout: 8000 });
   eq(await W(page, () => window.__wpe.project.maps.length), 38, "mapas de la plantilla");
@@ -779,7 +804,7 @@ await test("packs: exportar mapas y criaturas de un proyecto e importarlos en ot
   eq([pack.format, pack.maps.map((m) => m.id)], ["wpe-pack", ["brisa"]], "contenido del pack");
   assert(pack.species.length > 0 && pack.types.length === 8, "el pack arrastra criaturas y nombres de tipo");
   // proyecto distinto y con otra tabla de tipos: importar
-  await page.click("header button:has-text('Nuevo')");
+  await menuItem(page, "Nuevo");
   await page.click(".tpl:has-text('Mini mundo')");
   await page.waitForTimeout(400);
   const before = await W(page, () => window.__wpe.project.maps.length);

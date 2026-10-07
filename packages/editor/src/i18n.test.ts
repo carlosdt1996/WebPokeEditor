@@ -7,7 +7,7 @@ import { Battle, makeMon } from "./battle";
 import { defaultProject } from "./project";
 import { STATUS_NAMES, BATTLE_STAT_NAMES } from "./project";
 
-const SOURCES = ["battle.ts", "game.ts", "main.ts", "ui/battleUi.ts"];
+const SOURCES = ["battle.ts", "game.ts", "main.ts", "ui/battleUi.ts", "ui/docks.ts"];
 const placeholders = (s: string) => [...new Set([...s.matchAll(/\{(\d+)\}/g)].map((m) => m[1]))].sort();
 
 describe("i18n", () => {

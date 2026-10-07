@@ -13,6 +13,7 @@ import { exportGameHtml, runPlayer } from "./player";
 import { TEMPLATES } from "./templates";
 import { battlePanel } from "./ui/battlePanel";
 import { dataPanel } from "./ui/dataPanel";
+import { dock, fileSystem, menu, sceneTree, type SceneHooks } from "./ui/docks";
 
 async function main() {
   if (window.__WPE_PLAYER__) { await runPlayer(); return; }
@@ -25,6 +26,7 @@ async function main() {
   const log = h("div", { class: "log" });
   const say = (m: string) => { log.prepend(h("div", {}, m)); while (log.childElementCount > 40) log.lastElementChild!.remove(); };
   view.onMessage = say;
+  let refreshDocks = () => {}; // se enlaza al construir los paneles (Escena y Sistema de archivos)
 
   // ---------- Autoguardado ----------
   let timer = 0;
@@ -128,7 +130,7 @@ async function main() {
   };
 
   const sizeInfo = h("span", { class: "muted" });
-  const sizeLabel = () => (sizeInfo.textContent = `${engine.width}×${engine.height} tiles · ${view.map?.npcs.length ?? 0} NPC · ${view.map?.warps.length ?? 0} saltos · ${view.map?.triggers?.length ?? 0} disparadores`);
+  const sizeLabel = () => (refreshDocks(), sizeInfo.textContent = `${engine.width}×${engine.height} tiles · ${view.map?.npcs.length ?? 0} NPC · ${view.map?.warps.length ?? 0} saltos · ${view.map?.triggers?.length ?? 0} disparadores`);
   const wIn = h("input", { type: "number", min: 4, max: 128, class: "n" }), hIn = h("input", { type: "number", min: 4, max: 128, class: "n" });
   const sync = () => { wIn.value = String(engine.width); hIn.value = String(engine.height); refreshMaps(); sizeLabel(); if (typeof renderEnter === "function") renderEnter(); };
   const sizeBox = h("div", { class: "row" }, "Tamaño", wIn, "×", hIn,
@@ -212,7 +214,7 @@ async function main() {
     }
     inspector.append(h("button", { class: "danger", onclick: () => view.deleteSelection() }, "🗑 Eliminar"));
   };
-  view.onSelect = renderInspector;
+  view.onSelect = (s) => { renderInspector(s); refreshDocks(); };
   renderInspector(null);
 
   // ---------- Script "al entrar al mapa" ----------
@@ -229,24 +231,28 @@ async function main() {
   // ---------- Barra superior y modos ----------
   const playBtn = h("button", { class: "primary" }, tr("▶ Probar"));
   const btn3d = h("button", { title: tr("Vista 3D estilo DS (requiere WebGPU). Q/E giran la cámara; arrastra para orbitar.") }, tr("🧊 3D"));
-  const side = h("aside", { class: "side" },
-    h("h3", {}, tr("Herramientas")), tools,
-    h("h3", {}, tr("Tiles")), palette,
-    h("h3", {}, tr("Vista")),
+  const section = (title: string, ...kids: (Node | null)[]) => h("details", { class: "section", open: true }, h("summary", {}, title), h("div", { class: "section-body" }, ...kids));
+  const side = h("aside", { class: "side dock right" },
+    section(tr("Inspector"), inspector),
+    section(tr("Mapas"),
+      h("div", { class: "row" }, mapSelect),
+      h("div", { class: "row" }, h("button", { onclick: newMap }, tr("+ Nuevo")), h("button", { onclick: renameMap }, tr("Renombrar")), h("button", { class: "danger", onclick: deleteMap }, tr("Eliminar"))),
+      sizeBox, sizeInfo,
+      h("h3", {}, tr("Clima en combate")), weatherSel),
+    section(tr("Al entrar al mapa"), enterBox),
+    section(tr("Al salir del mapa"), exitBox),
+    h("p", { class: "hint" }, tr("Rueda: zoom · Clic derecho / Espacio+arrastrar: mover · Ctrl+Z / Ctrl+Y: deshacer/rehacer · Supr: borrar selección")),
+  );
+  const toolbar = h("div", { class: "toolbar" }, tools, h("span", { class: "tb-sep" }),
     check(tr("Cuadrícula"), true, (v) => (view.showGrid = v)),
     check(tr("Mostrar colisiones"), false, (v) => (view.showSolid = v)),
     check(tr("Mostrar alturas (3D)"), false, (v) => (view.showHeights = v)),
-    h("button", { onclick: () => view.fit() }, tr("Centrar mapa")),
-    h("h3", {}, tr("Mapas")),
-    h("div", { class: "row" }, mapSelect),
-    h("div", { class: "row" }, h("button", { onclick: newMap }, tr("+ Nuevo")), h("button", { onclick: renameMap }, tr("Renombrar")), h("button", { class: "danger", onclick: deleteMap }, tr("Eliminar"))),
-    sizeBox, sizeInfo,
-    h("h3", {}, tr("Clima en combate")), weatherSel,
-    h("h3", {}, tr("Al entrar al mapa")), enterBox,
-    h("h3", {}, tr("Al salir del mapa")), exitBox,
-    h("h3", {}, tr("Inspector")), inspector,
-    h("p", { class: "hint" }, tr("Rueda: zoom · Clic derecho / Espacio+arrastrar: mover · Ctrl+Z / Ctrl+Y: deshacer/rehacer · Supr: borrar selección")),
-  );
+    h("button", { onclick: () => view.fit() }, tr("Centrar mapa")));
+  // panel inferior (como el de Godot): paleta de tiles y salida de mensajes
+  const bottomTabs: [string, string, HTMLElement][] = [["tiles", tr("Tiles"), h("div", { class: "bottom-pane" }, palette)], ["out", tr("Mensajes"), h("div", { class: "bottom-pane" }, log)]];
+  const bottom = h("section", { class: "bottom" }, h("div", { class: "bottom-tabs", role: "tablist" }, ...bottomTabs.map(([k, label]) => h("button", { class: "btab", "data-tab": k, onclick: () => showBottom(k) }, label))), ...bottomTabs.map(([, , el]) => el));
+  const showBottom = (id: string) => { bottomTabs.forEach(([k, , el]) => (el.hidden = k !== id)); bottom.querySelectorAll(".btab").forEach((b) => b.classList.toggle("sel", (b as HTMLElement).dataset.tab === id)); };
+  showBottom("tiles");
   const togglePlay = () => {
     mapTab.classList.toggle("playing", !view.playing);
     if (view.playing) { view.stopPlay(); playBtn.textContent = tr("▶ Probar"); side.classList.remove("disabled"); sync(); }
@@ -259,7 +265,15 @@ async function main() {
   };
   const muteBtn = h("button", { title: tr("Silenciar / activar sonido"), onclick: () => { setMuted(!isMuted()); muteBtn.textContent = isMuted() ? "🔇" : "🔊"; } }, "🔊");
 
-  const mapTab = h("div", { class: "maptab" }, side, h("div", { class: "stage" }, view.el), h("aside", { class: "log-panel" }, h("h3", {}, tr("Mensajes")), log));
+  const hooks: SceneHooks = {
+    project: () => project, mapIndex: () => view.mapIndex, selection: () => view.selection,
+    select: (sel) => view.select(sel), switchMap: (i) => { view.switchMap(i); sync(); },
+    openData: (name) => { show("data"); const hd = [...data.el.querySelectorAll("h2")].find((e) => e.textContent?.includes(name)); hd?.scrollIntoView({ block: "start" }); },
+  };
+  const scene = sceneTree(hooks), files = fileSystem(hooks);
+  refreshDocks = () => { scene.refresh(); files.refresh(); };
+  const left = h("aside", { class: "dock left" }, dock(tr("Escena"), scene.el, "scene"), dock(tr("Sistema de archivos"), files.el, "fs"));
+  const mapTab = h("div", { class: "maptab" }, left, h("div", { class: "center" }, toolbar, h("div", { class: "stage" }, view.el), bottom), side);
 
   // ---------- Pestañas ----------
   const data = dataPanel(() => project, { onChange: () => { persist(); battle.refresh(); }, onAtlas: (u) => void applyAtlas(u), onReplace: (p) => void loadProject(p) });
@@ -324,18 +338,22 @@ async function main() {
   };
 
   const top = h("header", { class: "top" },
-    h("div", { class: "brand" }, "◓ WebPokeEditor"), nameIn,
+    h("div", { class: "brand", title: "WebPokeEditor" }, "◓"),
+    menu(tr("Proyecto"), [
+      { label: tr("Nuevo"), run: () => newProject() },
+      { label: tr("Importar"), title: tr("Importa un proyecto (.wpe.json)"), run: () => fileIn.click() },
+      { label: tr("Exportar proyecto"), title: tr("Guarda el proyecto (.wpe.json) para seguir editándolo"), run: exportJson },
+      { label: tr("📦 Exportar juego"), title: tr("Genera un único .html jugable con tu juego"), run: () => void exportGame() },
+    ]),
+    nameIn, tabBar, btn3d,
     h("div", { class: "grow" }), status,
-    h("button", { onclick: () => fileIn.click() }, tr("Importar")), h("button", { onclick: exportJson, title: tr("Guarda el proyecto (.wpe.json) para seguir editándolo") }, tr("Exportar proyecto")),
-    h("button", { onclick: exportGame, title: tr("Genera un único .html jugable con tu juego") }, tr("📦 Exportar juego")),
-    h("button", { onclick: () => newProject() }, tr("Nuevo")),
     h("select", { title: tr("Idioma de la interfaz"), onchange: (e: Event) => { setLang((e.target as HTMLSelectElement).value as Lang); location.reload(); } }, ...LANGS.map(([k, l]) => h("option", { value: k, selected: getLang() === k }, l))),
-    muteBtn, btn3d, playBtn, fileIn,
+    muteBtn, playBtn, fileIn,
   );
   const motion = h("label", { class: "check inline", title: tr("Desactiva animaciones (hierba, agua, sacudidas)") }, h("input", { type: "checkbox", checked: reducedMotion(), onchange: (e: Event) => { const v = (e.target as HTMLInputElement).checked; setReducedMotion(v); } }), tr("Movimiento reducido"));
   const footer = h("footer", {}, motion, h("span", {}, tr("Motor: Rust → WASM · Render: ")), h("b", {}, "…"), h("span", {}, " · Sin afiliación con Nintendo/Game Freak/The Pokémon Company. Criaturas y arte originales; importa tus propios gráficos en Datos."));
 
-  app.append(top, tabBar, body, footer);
+  app.append(top, body, footer);
   enhanceA11y(app);
   await view.init(project, atlas);
   footer.querySelector("b")!.textContent = view.rendererKind === "webgpu" ? "WebGPU (+3D)" : "Canvas 2D (sin WebGPU, sin modo 3D)";

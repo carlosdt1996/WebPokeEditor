@@ -205,3 +205,113 @@ body { overscroll-behavior: none; touch-action: manipulation; -webkit-tap-highli
 /* la rejilla principal nunca crece más que la pantalla: las tablas anchas hacen scroll dentro de su panel */
 #app { grid-template-columns: minmax(0, 1fr); }
 main { min-width: 0; overflow: hidden; }
+
+/* ===================================================================
+   Tema y disposición al estilo del editor de Godot 4
+   (paleta oscura azulada, acento azul, menús arriba, paneles acoplables:
+   Escena + Sistema de archivos a la izquierda, Inspector a la derecha,
+   panel inferior con pestañas y barra de estado). Solo se imita la
+   organización: no se usan iconos, logotipos ni recursos de Godot.
+   =================================================================== */
+:root {
+  --bg: #21262e; --panel: #2b3039; --panel2: #363d4a; --line: #1b1f26; --text: #e0e3e8; --muted: #a2a9b5;
+  --accent: #478cbf; --accent2: #6cb2e3; --field: #1d2229; --hover: #3f4757; --sel: #405a73;
+}
+body { font-size: 13px; font-family: "Open Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+#app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+button { background: var(--panel2); border: 1px solid #2a3039; border-radius: 3px; padding: 3px 9px; }
+button:hover { background: var(--hover); border-color: var(--accent); }
+button.sel { background: var(--sel); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: #5a9fd1; }
+input[type=text], input[type=number], select, .field textarea { background: var(--field); border: 1px solid #14181e; border-radius: 3px; }
+input[type=text]:focus, input[type=number]:focus, select:focus, textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+/* barra superior: menú, nombre del proyecto, espacios de trabajo, controles de ejecución */
+.top { gap: 6px; padding: 3px 8px; background: #1f242b; border-bottom: 1px solid #14181e; min-height: 38px; }
+.top .brand { font-size: 20px; padding: 0 4px; color: var(--accent2); }
+.top .title { width: 150px; background: transparent; border-color: transparent; font-weight: 600; }
+.top .title:hover, .top .title:focus { background: var(--field); border-color: #14181e; }
+.top .tabs { padding: 0; background: transparent; border: none; gap: 2px; margin-left: 6px; }
+.top .tabs button, .top > button { border-radius: 3px; background: transparent; border: 1px solid transparent; padding: 4px 12px; }
+.top .tabs button:hover, .top > button:hover { background: var(--hover); }
+.top .tabs button.sel, .top > button.sel { background: var(--panel2); border-color: #14181e; color: #fff; box-shadow: inset 0 -2px 0 var(--accent); }
+.top > button.primary { background: var(--accent); color: #fff; }
+.menu-root { position: relative; }
+.menu-btn { background: transparent; border-color: transparent; padding: 4px 10px; }
+.menu-btn[aria-expanded=true] { background: var(--panel2); }
+.menu-pop { position: absolute; top: calc(100% + 2px); left: 0; z-index: 30; min-width: 190px; background: #2b3039; border: 1px solid #14181e; border-radius: 4px; padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.5); display: grid; }
+.menu-pop[hidden] { display: none; }
+.menu-pop button { text-align: left; background: transparent; border-color: transparent; padding: 6px 10px; }
+.menu-pop button:hover { background: var(--accent); color: #fff; }
+
+/* disposición principal: [escena | centro | inspector] */
+.maptab { display: grid; grid-template-columns: 250px minmax(0, 1fr) 320px; gap: 0; height: 100%; min-height: 0; background: var(--bg); }
+.dock { background: var(--panel); overflow: auto; min-height: 0; padding: 0; }
+.dock.left { display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); border-right: 1px solid #14181e; }
+.dock.right { border-left: 1px solid #14181e; padding: 0 0 12px; }
+.dock-panel { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid #14181e; }
+.dock-panel:last-child { border-bottom: none; }
+.dock-title, .section > summary { background: #232830; color: var(--muted); font-weight: 700; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; padding: 6px 10px; border-bottom: 1px solid #14181e; cursor: default; }
+.dock-panel > .tree { overflow: auto; flex: 1; }
+.tree { padding: 4px 0; }
+.tree-row { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: transparent; border: none; border-radius: 0; padding: 2px 8px; min-height: 22px; font-size: 12.5px; }
+.tree-row:hover { background: var(--hover); }
+.tree-row.sel { background: var(--sel); color: #fff; }
+.tree-row.folder { font-weight: 600; }
+.tree-ico { width: 16px; text-align: center; flex: none; }
+.tree-lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-group { color: var(--muted); font-size: 11.5px; padding: 3px 8px; }
+.section { border-bottom: 1px solid #14181e; }
+.section > summary { cursor: pointer; list-style: none; position: sticky; top: 0; z-index: 2; }
+.section > summary::before { content: "▾ "; } .section:not([open]) > summary::before { content: "▸ "; }
+.section-body { padding: 8px 10px; display: grid; gap: 6px; }
+.section-body h3 { margin: 8px 0 2px; }
+.side.disabled { opacity: .45; pointer-events: none; }
+
+/* centro: barra de herramientas, vista y panel inferior */
+.center { display: grid; grid-template-rows: auto minmax(0, 1fr) 190px; min-width: 0; min-height: 0; }
+.toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 4px 8px; background: #262b33; border-bottom: 1px solid #14181e; }
+.toolbar .tools { display: flex; gap: 2px; flex-wrap: wrap; }
+.toolbar .tools button { padding: 3px 8px; font-size: 12px; }
+.toolbar .check { margin: 0 4px; font-size: 12px; } .tb-sep { width: 1px; align-self: stretch; background: #14181e; margin: 0 6px; }
+.center .stage { padding: 0; }
+.center .viewport { border-radius: 0; border: none; }
+.bottom { display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--panel); border-top: 1px solid #14181e; min-height: 0; }
+.bottom-tabs { display: flex; gap: 2px; padding: 3px 6px 0; background: #232830; border-bottom: 1px solid #14181e; }
+.btab { border-radius: 3px 3px 0 0; background: transparent; border-color: transparent; padding: 3px 12px; }
+.btab.sel { background: var(--panel); border-color: #14181e; border-bottom-color: var(--panel); color: #fff; box-shadow: inset 0 2px 0 var(--accent); }
+.bottom-pane { overflow: auto; padding: 8px; min-height: 0; }
+.bottom-pane[hidden] { display: none; }
+.bottom .palette { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 4px; }
+.bottom .swatch { padding: 3px; } .bottom .swatch.sel { background: var(--sel); border-color: var(--accent); }
+.log div { border-bottom-color: #14181e; }
+
+/* barra de estado */
+footer { background: #1f242b; border-top: 1px solid #14181e; color: var(--muted); }
+
+/* panel de datos y calculadora con la misma estética */
+.panel { max-width: none; background: var(--panel); }
+th { color: var(--muted); }
+h2 { font-size: 15px; border-bottom: 1px solid #14181e; padding-bottom: 4px; }
+
+/* móvil: se apila (vista, panel inferior, inspector y escena) */
+@media (max-width: 900px) {
+  .top { gap: 4px; padding: 4px 6px; }
+  .top .brand, .top .grow, .top .status { display: none; }
+  .top .title { flex: 1 1 100px; width: auto; min-width: 80px; }
+  .top .tabs { order: 5; width: 100%; margin: 0; overflow-x: auto; }
+  .maptab { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+  .maptab > * { flex: none; min-height: auto; }
+  .center { display: flex; flex-direction: column; order: 1; flex: none; }
+  .center .stage { height: 52dvh; min-height: 260px; flex: none; }
+  .bottom { height: 200px; flex: none; }
+  .side.dock { min-height: auto; order: 2; border-left: none; border-top: 1px solid #14181e; overflow: visible; }
+  .dock.left { min-height: auto; order: 3; display: block; border-right: none; border-top: 1px solid #14181e; overflow: visible; }
+  .dock-panel { display: block; } .dock-panel > .tree { max-height: 220px; overflow: auto; }
+  .maptab.playing .dock, .maptab.playing .bottom, .maptab.playing .toolbar { display: none; }
+  .maptab.playing .center { height: 100%; flex: 1; }
+  .maptab.playing .center .stage { height: 100%; min-height: 0; }
+  .toolbar { padding: 4px; } .toolbar .check { display: none; }
+}
+@media (max-height: 520px) and (pointer: coarse) { .center .stage { height: 80dvh; } }

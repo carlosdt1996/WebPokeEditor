@@ -17,3 +17,15 @@
 
 ## Tecnología
 Framework de UI a decidir en ADR (candidatos: SolidJS, React, Svelte). El canvas WebGPU se aísla del árbol de componentes.
+
+
+## Disposición al estilo de Godot
+La interfaz imita la organización del editor de Godot 4 (no sus iconos, logotipos ni recursos; los iconos son emojis):
+- **Barra superior**: menú *Proyecto* (Nuevo, Importar, Exportar proyecto, Exportar juego), nombre del proyecto, espacios de trabajo (*Mapa*, *Datos*, *Calculadora*, *3D*) y, a la derecha, idioma, sonido y ▶ Probar / ■ Detener.
+- **Izquierda**: dock **Escena** (árbol del mapa actual: NPC, saltos y disparadores; al hacer clic se selecciona el elemento) y dock **Sistema de archivos** (`res://`: mapas, especies, movimientos, objetos y habilidades; abre la pestaña Datos en la sección correspondiente).
+- **Centro**: barra de herramientas (Mover, Pintar, Rellenar…), vista del mapa y **panel inferior** con pestañas *Tiles* (paleta) y *Mensajes*.
+- **Derecha**: **Inspector** con secciones plegables (selección, mapa y clima, scripts al entrar/salir).
+- **Barra de estado** inferior. Paleta de colores oscura azulada con acento azul.
+- En pantallas estrechas los paneles se apilan (ver `docs/guides/movil.md`).
+
+El código está en `ui/docks.ts` (árbol de escena, sistema de archivos y menú) y en el ensamblado de `main.ts`; los estilos, al final de `style.css`.
