@@ -401,7 +401,7 @@ function ruta4(): GameMap {
 }
 
 function marea(): GameMap {
-  const g = townBase(28, 18, 9, [[0, 9]]);
+  const g = townBase(28, 18, 9, [[0, 9], [27, 9]]);
   sea(g, 14);
   house(g, 3, 3, 6, 4, 5); vline(g, 5, 7, 9);
   house(g, 11, 2, 7, 5, 14); vline(g, 14, 7, 9);
@@ -409,10 +409,10 @@ function marea(): GameMap {
   hill(g, 9, 12, 2, 2);
   scatter(g, 14, 8, 91); scatter(g, 13, 6, 92); scatter(g, 12, 4, 93, (_, y) => y < 9);
   return build("marea", "Isla Marea", g, {
-    warps: [warp(0, 9, "ruta4", 30, 8), warp(5, 6, "centro-marea", 6, 7), warp(14, 6, "gym-marea", 7, 10), warp(22, 6, "liga", 7, 14)],
-    triggers: [gate(22, 7, "medalla4", "Solo los entrenadores con las cuatro medallas pueden entrar en la Liga.", "marea", 20, 9)],
+    warps: [warp(0, 9, "ruta4", 30, 8), warp(27, 9, "ruta5", 1, 7), warp(5, 6, "centro-marea", 6, 7), warp(14, 6, "gym-marea", 7, 10), warp(22, 6, "liga", 7, 14)],
+    triggers: [gate(22, 7, "medalla8", "Solo los entrenadores con las ocho medallas pueden entrar en la Liga.", "marea", 20, 9), gate(26, 9, "medalla4", "El camino al este exige la Medalla Marea.", "marea", 24, 9)],
     npcs: [
-      npc("anciano", 8, 11, 2, 0, "Anciano", ["Esta isla es el corazón del archipiélago. La Liga está a nuestras espaldas, en el edificio grande.", "Para entrar necesitas las cuatro medallas."]),
+      npc("anciano", 8, 11, 2, 0, "Anciano", ["Esta isla es el corazón del archipiélago. La Liga está a nuestras espaldas, en el edificio grande.", "Para entrar necesitas las ocho medallas: al este hay cuatro ciudades más."]),
       npc("turista", 17, 11, 1, 2, "Turista", ["¡Qué lugar! Dicen que el Campeón nunca ha perdido..."]),
     ],
   });
@@ -421,6 +421,68 @@ const gymMarea = () => gym("gym-marea", "Gimnasio de Isla Marea", ["marea", 14, 
   leader("marino", "Marino", 2, [mon("marejon", 36, "baya-oran"), mon("caracolin", 35), mon("gaviotin", 36), mon("tsunamo", 38, "banda")], 4, "Medalla Marea", "¡Soy Marino! Mis olas arrastran a cualquiera.", "¡Una marea imparable! Eres digno de la Liga."),
   [trainer("nautica", 4, 6, 2, 3, "Navegante Alba", "¡Zarpamos!", [mon("marejon", 33), mon("caracolin", 32)]),
    trainer("pirata", 9, 4, 1, 2, "Pirata Rojo", "¡A abordar!", [mon("gaviotin", 34), mon("chispin", 33)], { double: false })]);
+
+// ---------- región este: ciudades 5–8 ----------
+interface EastTown { id: string; name: string; weather?: GameMap["weather"]; talk: [string, string]; leader: Npc; aides: Npc[]; }
+function eastTown(t: EastTown, prevRoute: string, nextRoute: string | null, prevMedal: number): GameMap[] {
+  const g = townBase(26, 16, 8, nextRoute ? [[0, 8], [25, 8]] : [[0, 8]]);
+  house(g, 4, 4, 6, 4, 6); house(g, 16, 3, 8, 5, 20);
+  hill(g, 12, 13, 3, 3);
+  scatter(g, 15, 10, t.id.length * 17, (_, y) => y !== 8); scatter(g, 12, 4, t.id.length * 29);
+  const town = build(t.id, t.name, g, {
+    weather: t.weather,
+    warps: [warp(0, 8, prevRoute, 28, 7), warp(6, 7, `centro-${t.id}`, 6, 7), warp(20, 7, `gym-${t.id}`, 7, 10), ...(nextRoute ? [warp(25, 8, nextRoute, 1, 7)] : [])],
+    triggers: nextRoute ? [gate(24, 8, `medalla${prevMedal + 1}`, `El camino al este exige la medalla de ${t.name}.`, t.id, 22, 8)] : [],
+    npcs: [npc(`${t.id}-a`, 12, 11, 1, 2, "Vecino", [t.talk[0]]), npc(`${t.id}-b`, 14, 6, 3, 1, "Vecina", [t.talk[1]])],
+  });
+  return [town, centro(`centro-${t.id}`, t.name, [t.id, 6, 8]), gym(`gym-${t.id}`, `Gimnasio de ${t.name}`, [t.id, 20, 8], t.leader, t.aides)];
+}
+function eastRoute(id: string, name: string, from: [string, number, number], to: string, seed: number, enc: string[], lv: [number, number], foes: Npc[], weather?: GameMap["weather"]): GameMap {
+  const g = grass(30, 14);
+  frame(g, [[0, 7], [29, 7]]);
+  hline(g, 7, 1, 28);
+  g.rect(3, 2, 10, 5, 1); g.rect(18, 9, 26, 12, 1); g.rect(4, 9, 9, 12, 1); g.rect(16, 2, 24, 4, 1);
+  scatter(g, [12, 13], 12, seed, (_, y) => y !== 7); scatter(g, 14, 6, seed + 1);
+  return build(id, name, g, {
+    weather,
+    warps: [warp(0, 7, from[0], from[1], from[2]), warp(29, 7, to, 1, 8)],
+    encounters: enc, encounterLevel: lv, npcs: foes,
+  });
+}
+const ruta5 = () => eastRoute("ruta5", "Ruta 5", ["marea", 26, 9], "vega", 101, ["voltaico", "chispin", "gaviotin", "murcio"], [32, 37], [
+  trainer("r5a", 12, 5, 0, 0, "Electricista Leo", "¡Te daré un buen calambre!", [mon("chispin", 34), mon("voltaico", 35)]),
+  trainer("r5b", 22, 9, 1, 2, "Excursionista Gil", "¡Llevo días caminando!", [mon("murcio", 35), mon("dunon", 35)]),
+]);
+const ruta6 = () => eastRoute("ruta6", "Ruta 6", ["vega", 24, 8], "pico", 111, ["gaviotin", "murcio", "rocalon", "piedrin"], [38, 43], [
+  trainer("r6a", 8, 6, 2, 0, "Alpinista Rey", "¡La cima está cerca!", [mon("rocalon", 40), mon("murcio", 40)]),
+  trainer("r6b", 20, 6, 3, 1, "Piloto Ana", "¡Despego!", [mon("gaviotin", 41), mon("gaviotin", 42, "banda")]),
+  trainer("r6c", 22, 10, 0, 2, "Geólogo Tito", "¡Mis rocas son perfectas!", [mon("piedrin", 38), mon("rocalon", 42)]),
+], "sand");
+const ruta7 = () => eastRoute("ruta7", "Ruta 7", ["pico", 24, 8], "dunas", 121, ["dunon", "terron", "rocalon", "murcio"], [44, 49], [
+  trainer("r7a", 10, 6, 1, 0, "Nómada Omar", "¡El desierto no perdona!", [mon("terron", 45), mon("dunon", 46)]),
+  trainer("r7b", 22, 6, 2, 1, "Arqueóloga Pía", "¡Busco reliquias!", [mon("rocalon", 47), mon("tsunamo", 46)]),
+], "sand");
+const ruta8 = () => eastRoute("ruta8", "Ruta 8", ["dunas", 24, 8], "selva", 131, ["selvatico", "frondon", "hojito", "murcio"], [48, 53], [
+  trainer("r8a", 8, 6, 0, 0, "Guardabosques Eli", "¡Respeta el bosque!", [mon("frondon", 49), mon("selvatico", 50)]),
+  trainer("r8b", 20, 6, 3, 1, "Botánica Yara", "¡Mis plantas son fuertes!", [mon("hojito", 46), mon("frondon", 50), mon("hojito", 48)]),
+  trainer("r8c", 21, 10, 1, 2, "Cazador Bruno", "¡Te seguía el rastro!", [mon("murcio", 51), mon("dunon", 51)]),
+], "rain");
+function eastTowns(): GameMap[] {
+  return [
+    ...eastTown({ id: "vega", name: "Ciudad Vega", talk: ["La central eléctrica abastece todo el archipiélago.", "Los Eléctricos son rápidos, pero la Tierra los anula."],
+      leader: leader("chispa", "Chispa", 3, [mon("chispin", 40), mon("voltaico", 41, "banda"), mon("gaviotin", 41), mon("voltaico", 43)], 5, "Medalla Chispa", "¡Soy Chispa! ¡Siente la descarga!", "¡Cortocircuito! Me has vencido."),
+      aides: [trainer("vg1", 4, 6, 0, 3, "Técnico Nilo", "¡Voltaje máximo!", [mon("chispin", 38), mon("voltaico", 39)]), trainer("vg2", 9, 4, 3, 2, "Operaria Cruz", "¡Cargando!", [mon("voltaico", 40)])] }, "ruta5", "ruta6", 4),
+    ...eastTown({ id: "pico", name: "Pico Alto", weather: "sand", talk: ["Aquí el aire es fino y las rocas resbalan.", "La Medalla Cima abre el paso a las dunas."],
+      leader: leader("cima", "Cima", 1, [mon("rocalon", 45, "carbon"), mon("gaviotin", 45), mon("murcio", 46), mon("rocalon", 48)], 6, "Medalla Cima", "¡Soy Cima! ¡Nadie escala más alto!", "Has llegado a la cumbre antes que yo."),
+      aides: [trainer("pk1", 4, 6, 1, 3, "Escalador Teo", "¡Sin cuerda!", [mon("rocalon", 43), mon("murcio", 43)]), trainer("pk2", 9, 4, 2, 2, "Vigía Ines", "¡Todo lo veo desde aquí!", [mon("gaviotin", 44)])] }, "ruta6", "ruta7", 5),
+    ...eastTown({ id: "dunas", name: "Dunas Doradas", weather: "sand", talk: ["El agua es oro en estas dunas.", "Dicen que la última ciudad es un bosque inmenso."],
+      leader: leader("duna", "Duna", 2, [mon("dunon", 49), mon("terron", 48), mon("rocalon", 50, "baya-oran"), mon("tsunamo", 52)], 7, "Medalla Duna", "¡Soy Duna! La arena lo entierra todo.", "Hasta la duna más alta se deshace."),
+      aides: [trainer("dn1", 4, 6, 3, 3, "Camellero Yus", "¡Despacio y con fuerza!", [mon("terron", 46), mon("dunon", 47)]), trainer("dn2", 9, 4, 0, 2, "Zahorí Rami", "¡Siento agua bajo tus pies!", [mon("tsunamo", 48)])] }, "ruta7", "ruta8", 6),
+    ...eastTown({ id: "selva", name: "Bosque Hondo", weather: "rain", talk: ["Aquí termina el camino... y empieza el de la Liga.", "Regresa a Isla Marea con ocho medallas."],
+      leader: leader("selvia", "Selvia", 3, [mon("frondon", 53), mon("selvatico", 54, "carbon"), mon("murcio", 53), mon("selvatico", 56, "banda")], 8, "Medalla Selva", "¡Soy Selvia! El bosque me protege.", "Las raíces ceden... eres digno de la Liga."),
+      aides: [trainer("sl1", 4, 6, 1, 3, "Druida Noa", "¡El bosque habla!", [mon("frondon", 51), mon("hojito", 49)]), trainer("sl2", 9, 4, 2, 2, "Leñador Fer", "¡Cuidado con las ramas!", [mon("selvatico", 52)])] }, "ruta8", null, 7),
+  ];
+}
 
 function liga(): GameMap {
   const g = new Grid(14, 16, 9);
@@ -434,12 +496,12 @@ function liga(): GameMap {
   return build("liga", "Liga del Archipiélago", g, {
     warps: [warp(7, 15, "marea", 22, 7)],
     npcs: [
-      elite("ola", 10, "Maestra Ola", 2, [mon("marejon", 42), mon("tsunamo", 43), mon("caracolin", 41)], "¡Soy Ola, del mar profundo!", "La marea me ha vencido..."),
-      elite("cumbre", 7, "Maestro Cumbre", 3, [mon("rocalon", 42), mon("dunon", 42), mon("rocalon", 43)], "¡Soy Cumbre, firme como una montaña!", "Incluso la montaña cede..."),
-      elite("llama", 4, "Maestra Llama", 0, [mon("infernal", 44), mon("gaviotin", 43), mon("brasaron", 42)], "¡Soy Llama! ¡Que arda todo!", "Mi llama se apaga..."),
+      elite("ola", 10, "Maestra Ola", 2, [mon("marejon", 56), mon("tsunamo", 58), mon("caracolin", 56)], "¡Soy Ola, del mar profundo!", "La marea me ha vencido..."),
+      elite("cumbre", 7, "Maestro Cumbre", 3, [mon("rocalon", 57), mon("dunon", 57), mon("rocalon", 59)], "¡Soy Cumbre, firme como una montaña!", "Incluso la montaña cede..."),
+      elite("llama", 4, "Maestra Llama", 0, [mon("infernal", 60), mon("gaviotin", 58), mon("brasaron", 58)], "¡Soy Llama! ¡Que arda todo!", "Mi llama se apaga..."),
       {
         ...trainer("aldo", 7, 1, 1, 0, "Campeón Aldo", "Has llegado muy lejos. Yo soy Aldo, el Campeón del Archipiélago. ¡Demuéstrame de qué estás hecho!",
-          [mon("selvatico", 46), mon("voltaico", 45), mon("tsunamo", 46), mon("infernal", 47), mon("dunon", 45), mon("gaviotin", 45, "banda")]),
+          [mon("selvatico", 62), mon("voltaico", 60), mon("tsunamo", 62), mon("infernal", 64), mon("dunon", 60), mon("gaviotin", 60, "banda")]),
         defeatedLines: ["¡Increíble! Eres el nuevo Campeón."],
         winScript: "flag campeon\nsay ¡El archipiélago tiene un nuevo Campeón!\nsay ★ FIN DE LA AVENTURA ★\nsay Gracias por jugar. Puedes seguir explorando, capturar más criaturas o crear tu propio mundo en el editor.",
       },
@@ -447,7 +509,7 @@ function liga(): GameMap {
   });
 }
 
-/** Plantilla de región completa: 21 mapas, 4 gimnasios, Liga, tiendas y centros de curación. */
+/** Plantilla de región completa: 33 mapas, 8 gimnasios, Liga, tiendas y centros de curación. */
 export function archipelagoProject(): Project {
   const base = defaultProject();
   return {
@@ -468,12 +530,13 @@ export function archipelagoProject(): Project {
       brisa(), casa(), lab(), ruta1(), coral(), centro("centro-coral", "Villa Coral", ["coral", 6, 7]), gymCoral(),
       ruta2(), cueva(), faro(), centro("centro-faro", "Puerto Faro", ["faro", 6, 7]), gymFaro(),
       ruta3(), ceniza(), centro("centro-ceniza", "Ciudad Ceniza", ["ceniza", 6, 8]), gymCeniza(),
-      ruta4(), marea(), centro("centro-marea", "Isla Marea", ["marea", 5, 7]), gymMarea(), liga(),
+      ruta4(), marea(), centro("centro-marea", "Isla Marea", ["marea", 5, 7]), gymMarea(),
+      ruta5(), ruta6(), ruta7(), ruta8(), ...eastTowns(), liga(),
     ],
   };
 }
 
 export const TEMPLATES: { id: string; name: string; description: string; build: () => Project }[] = [
   { id: "ejemplo", name: "Mini mundo de ejemplo", description: "Pueblo, casa y ruta para probar el editor.", build: defaultProject },
-  { id: "archipielago", name: "Archipiélago de la Marea (región completa)", description: "Región original: 21 mapas, 4 gimnasios, Liga, tiendas, medallas y progresión.", build: archipelagoProject },
+  { id: "archipielago", name: "Archipiélago de la Marea (región completa)", description: "Región original: 33 mapas, 8 gimnasios, Liga, tiendas, medallas y progresión.", build: archipelagoProject },
 ];

@@ -76,14 +76,14 @@ describe("plantilla «Archipiélago de la Marea»", () => {
     expect(bad).toEqual([]);
   });
 
-  it("la progresión es consistente: las puertas usan marcas que algún guion activa, y hay 4 medallas", () => {
+  it("la progresión es consistente: las puertas usan marcas que algún guion activa, y hay 8 medallas", () => {
     const set = new Set<string>(), needed = new Set<string>();
     const scan = (code: Instr[]) => { for (const i of code) { if (i.op === "flag") set.add(i.name); if (i.op === "jif") needed.add(i.flag); } };
     for (const m of p.maps) {
       const scripts = [m.onEnter, m.onExit, ...(m.triggers ?? []).map((t) => t.script), ...m.npcs.flatMap((n) => [n.script, n.winScript])];
       for (const s of scripts) if (s) { const r = parseScript(s); if (r.ok) scan(r.code); }
     }
-    for (const f of ["starter", "medalla1", "medalla2", "medalla3", "medalla4", "campeon"]) expect(set.has(f), `ningún guion activa "${f}"`).toBe(true);
+    for (const f of ["starter", "medalla1", "medalla2", "medalla3", "medalla4", "medalla5", "medalla6", "medalla7", "medalla8", "campeon"]) expect(set.has(f), `ningún guion activa "${f}"`).toBe(true);
     for (const f of needed) expect(set.has(f), `se consulta "${f}" pero nunca se activa`).toBe(true);
   });
 
@@ -135,6 +135,10 @@ describe("plantilla «Archipiélago de la Marea»", () => {
     expect(peak("fresia")).toBeLessThan(peak("voltio"));
     expect(peak("voltio")).toBeLessThan(peak("brasa"));
     expect(peak("brasa")).toBeLessThan(peak("marino"));
-    expect(peak("marino")).toBeLessThan(peak("aldo"));
+    expect(peak("marino")).toBeLessThan(peak("chispa"));
+    expect(peak("chispa")).toBeLessThan(peak("cima"));
+    expect(peak("cima")).toBeLessThan(peak("duna"));
+    expect(peak("duna")).toBeLessThan(peak("selvia"));
+    expect(peak("selvia")).toBeLessThan(peak("aldo"));
   });
 });
