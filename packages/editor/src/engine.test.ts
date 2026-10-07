@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Engine, Ev, Input } from "./engine";
-import { Battle, healAll, makeMon } from "./battle";
+import { Battle, healAll, makeMon, monMaxHp } from "./battle";
 import { movesFromCsv, movesToCsv, parseCsv, speciesFromCsv, speciesToCsv, toCsv } from "./csv";
 import { parseScript, runScript } from "./script";
 import { decodeTiles, defaultProject, effectiveness, encodeTiles, migrate, parseProject, validate } from "./project";
@@ -67,7 +67,7 @@ describe("migración de esquema", () => {
     delete v2.items;
     delete v2.abilities;
     const p = migrate(v2);
-    expect(p.schemaVersion).toBe(4);
+    expect(p.schemaVersion).toBe(5);
     expect(p.inventory).toEqual({ ball: 7, potion: 2 });
     expect(p.items.length).toBe(2);
     expect(validate(p)).toEqual([]);
@@ -82,7 +82,7 @@ describe("migración de esquema", () => {
       encounters: ["a"],
     };
     const p = migrate(v1);
-    expect(p.schemaVersion).toBe(4);
+    expect(p.schemaVersion).toBe(5);
     expect(p.abilities).toEqual([]);
     expect(p.items.map((i) => i.id)).toEqual(["potion", "ball"]);
     expect(p.maps).toHaveLength(1);
@@ -145,7 +145,7 @@ describe("scripts (VM en Rust)", () => {
     return {
       log,
       ctx: {
-        choose: async () => 0, say: async (l: string[]) => { log.push("say:" + l.join("|")); },
+        choose: async () => 0, equip: () => {}, say: async (l: string[]) => { log.push("say:" + l.join("|")); },
         give: (i: string, n: number) => { log.push(`give:${i}:${n}`); },
         heal: () => { log.push("heal"); },
         battle: async (s: string, l: number) => { log.push(`battle:${s}:${l}`); },
@@ -206,7 +206,7 @@ describe("scripts: variables, bucles y disparadores", () => {
     if (!r.ok) throw new Error(r.errors.join());
     const log: string[] = [];
     await runScript(r.code, {
-      choose: async () => 0, say: async (l) => { log.push("say:" + l.join("|")); }, give: (i, n) => { log.push(`give:${i}:${n}`); }, heal: () => { log.push("heal"); },
+      choose: async () => 0, equip: () => {}, say: async (l) => { log.push("say:" + l.join("|")); }, give: (i, n) => { log.push(`give:${i}:${n}`); }, heal: () => { log.push("heal"); },
       battle: async (s, l) => { log.push(`battle:${s}:${l}`); }, givemon: (s, l) => { log.push(`givemon:${s}:${l}`); }, warp: async (m) => { log.push(`warp:${m}`); },
     }, e);
     return { log, e };
@@ -260,10 +260,38 @@ describe("scripts: variables, bucles y disparadores", () => {
     const r = parseScript("setstr nombre Ana\nsay Hola {nombre}\nchoice Sí {nombre} | No | Quizá\nif choice == 1\nsay dijo no\nelse\nsay otra\nend");
     if (!r.ok) throw new Error(r.errors.join());
     const log: string[] = [];
-    await runScript(r.code, { choose: async (o) => { log.push("opts:" + o.join("/")); return 1; }, say: async (l) => { log.push("say:" + l.join("|")); }, give: () => {}, heal: () => {}, battle: async () => {}, givemon: () => {}, warp: async () => {} }, e);
+    await runScript(r.code, { equip: () => {}, choose: async (o) => { log.push("opts:" + o.join("/")); return 1; }, say: async (l) => { log.push("say:" + l.join("|")); }, give: () => {}, heal: () => {}, battle: async () => {}, givemon: () => {}, warp: async () => {} }, e);
     expect(log).toEqual(["say:Hola Ana", "opts:Sí Ana/No/Quizá", "say:dijo no"]);
     expect(e.getVar("choice")).toBe(1);
     expect(parseScript("choice solo").ok).toBe(false);
+  });
+  it("listas: crear, añadir, leer por índice o variable, longitud, pop, clear y elegir al azar (reproducible)", async () => {
+    const a = await run("list frutas manzana | pera | uva\npush frutas {extra}\nlen frutas n\nget frutas 1 f\nsay {n} {f}\nset i 2\nget frutas i g\nsay {g}\npop frutas\nlen frutas n2\nsay {n2}\nclear frutas\nlen frutas n3\nsay {n3}", (e) => e.setStr("extra", "kiwi"));
+    expect(a.log).toEqual(["say:4 pera|uva|3|0"]);
+    const pick = async () => (await run("list x a | b | c | d | e\npick x r\nsay {r}")).log[0];
+    expect(await pick()).toBe(await pick()); // misma semilla ⇒ misma elección
+    const e = await Engine.load(wasm());
+    e.reset(4, 4, 1); e.flagsReset();
+    expect(e.lists.size).toBe(0);
+  });
+  it("operaciones con texto: upper, lower, strlen, streq y contains", async () => {
+    const r = await run("setstr n Pikachu\nupper n\nsay {n}\nlower n\nstrlen n len\nstreq n pikachu eq\ncontains n chu c1\ncontains n xyz c2\nsay {len} {eq} {c1} {c2}");
+    expect(r.log).toEqual(["say:PIKACHU|7 1 1 0"]);
+  });
+  it("equip se delega en el juego y sus argumentos se validan", async () => {
+    const e = await Engine.load(wasm());
+    e.flagsReset();
+    const r = parseScript("equip restos\nlist l a | b\nget l 0 x");
+    if (!r.ok) throw new Error(r.errors.join());
+    const got: string[] = [];
+    await runScript(r.code, { choose: async () => 0, equip: (i) => got.push(i), say: async () => {}, give: () => {}, heal: () => {}, battle: async () => {}, givemon: () => {}, warp: async () => {} }, e);
+    expect(got).toEqual(["restos"]);
+    for (const bad of ["list a", "list 1x a | b", "push l", "get l 0", "streq a b", "len l", "equip"]) expect(parseScript(bad).ok).toBe(false);
+    const p = defaultProject();
+    p.maps[0].onEnter = "equip no-es-equipable";
+    expect(validate(p).some((x) => x.includes("objeto equipable inexistente"))).toBe(true);
+    p.maps[0].onEnter = "equip restos";
+    expect(validate(p)).toEqual([]);
   });
   it("el proyecto valida los scripts de los disparadores y su posición", () => {
     const p = defaultProject();
@@ -375,6 +403,94 @@ describe("combate: estados, etapas, habilidades y efectos de movimientos", () =>
     p.moves[0].effect = { priority: 9, stat: { stat: "atk", stages: 9, target: "self", chance: 100 }, drain: 150 };
     const errs = validate(p);
     expect(errs.filter((x) => x.includes("Embestida")).length).toBe(3);
+  });
+});
+
+describe("combate: clima, terreno, multigolpe, carga/recarga, precisión y objetos equipables", () => {
+  const txt = (evs: { text: string }[]) => evs.map((e) => e.text);
+  const setup = async (seed: number, mine: string, foe: string, moves: string[], opts: { weather?: "sun" | "rain" | "sand" | "hail"; heldMine?: string; heldFoe?: string } = {}) => {
+    const e = await Engine.load(wasm());
+    e.reset(8, 8, seed);
+    const p = defaultProject();
+    const me = makeMon(p, mine, 40, opts.heldMine), fo = makeMon(p, foe, 30, opts.heldFoe);
+    me.moves = moves;
+    fo.hp = 9999;
+    const b = new Battle(p, e, [me], [fo], { trainer: "T", weather: opts.weather, inv: {} });
+    return { b, p, me, fo };
+  };
+
+  it("clima del mapa al empezar, clima por movimiento y su duración", async () => {
+    const a = await setup(1, "flamito", "pelusin", ["embestida"], { weather: "rain" });
+    expect(txt(a.b.startEvents)).toContain("¡Empieza a llover!");
+    const { b } = await setup(2, "flamito", "pelusin", ["dia-soleado", "embestida"]);
+    expect(txt(b.turn({ kind: "move", index: 0 }))).toContain("¡El sol brilla con fuerza!");
+    let ended = false;
+    for (let i = 0; i < 6; i++) ended ||= txt(b.turn({ kind: "move", index: 1 })).includes("El sol vuelve a la normalidad.");
+    expect(ended).toBe(true);
+  });
+
+  it("el sol potencia al tipo Fuego y la lluvia lo debilita (reglas por datos)", async () => {
+    const dmg = async (w: "sun" | "rain") => {
+      const { b } = await setup(3, "flamito", "pelusin", ["ascua"], { weather: w });
+      const t = txt(b.turn({ kind: "move", index: 0 })).find((x) => x.endsWith("de daño."));
+      return t ? parseInt(t) : 0;
+    };
+    expect(await dmg("sun")).toBeGreaterThan(await dmg("rain"));
+  });
+
+  it("multigolpe, carga y recarga producen sus mensajes", async () => {
+    const a = await setup(4, "pelusin", "pelusin", ["doble-golpe"]);
+    expect(txt(a.b.turn({ kind: "move", index: 0 })).some((x) => /Golpeó [2-5] veces/.test(x))).toBe(true);
+    const c = await setup(5, "hojin", "pelusin", ["rayo-solar", "embestida"]);
+    const c1 = txt(c.b.turn({ kind: "move", index: 0 }));
+    expect(c1.some((x) => x.includes("acumula energía"))).toBe(true);
+    const r = await setup(6, "pelusin", "pelusin", ["hiperrayo", "embestida"]);
+    r.b.turn({ kind: "move", index: 0 });
+    expect(txt(r.b.turn({ kind: "move", index: 0 })).some((x) => x.includes("debe recuperarse"))).toBe(true);
+  });
+
+  it("Ataque Arena baja la precisión del rival y el terreno se anuncia", async () => {
+    const a = await setup(7, "pelusin", "pelusin", ["ataque-arena"]);
+    expect(txt(a.b.turn({ kind: "move", index: 0 })).some((x) => x.includes("Precisión de Pelusín") && x.includes("baja"))).toBe(true);
+    const t = await setup(8, "hojin", "pelusin", ["campo-hierba"]);
+    expect(txt(t.b.turn({ kind: "move", index: 0 })).some((x) => x.includes("terreno de tipo Planta"))).toBe(true);
+  });
+
+  it("objetos equipables: restos curan, la baya se consume y se refleja en la criatura", async () => {
+    const r = await setup(9, "flamito", "pelusin", ["embestida"], { heldMine: "restos" });
+    r.me.hp = 20;
+    expect(txt(r.b.turn({ kind: "move", index: 0 })).some((x) => x.includes("con Restos"))).toBe(true);
+    const bay = await setup(10, "flamito", "pelusin", ["embestida"], { heldMine: "baya-oran" });
+    bay.me.hp = Math.floor(monMaxHp(bay.p, bay.me) / 2);
+    const out: string[] = [];
+    for (let i = 0; i < 3 && bay.me.held; i++) out.push(...txt(bay.b.turn({ kind: "move", index: 0 })));
+    expect(out.some((x) => x.includes("se come Baya Oran"))).toBe(true);
+    expect(bay.me.held).toBeUndefined();
+  });
+
+  it("el proyecto valida objetos equipables, clima y golpes", () => {
+    const p = defaultProject();
+    expect(validate(p)).toEqual([]);
+    p.party[0].held = "carbon";
+    expect(validate(p)).toEqual([]);
+    p.party[0].held = "no-existe";
+    p.moves[0].effect = { hits: { min: 4, max: 2 }, crit: 7 };
+    p.maps[0].onExit = "volar";
+    const errs = validate(p);
+    expect(errs.some((x) => x.includes("objeto equipable inexistente"))).toBe(true);
+    expect(errs.some((x) => x.includes("golpes"))).toBe(true);
+    expect(errs.some((x) => x.includes("crítico"))).toBe(true);
+    expect(errs.some((x) => x.includes("script de salida"))).toBe(true);
+  });
+
+  it("migración v4 → v5 añade las reglas de clima por nombre de tipo", () => {
+    const v4 = { ...defaultProject(), schemaVersion: 4 } as Record<string, unknown>;
+    delete v4.weatherRules;
+    const p = migrate(v4);
+    expect(p.schemaVersion).toBe(5);
+    expect(p.weatherRules.sun.boost).toBe(1); // Fuego
+    expect(p.weatherRules.rain.boost).toBe(2); // Agua
+    expect(p.weatherRules.sand.chip).toBe(true);
   });
 });
 

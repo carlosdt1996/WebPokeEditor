@@ -37,7 +37,7 @@ interface Exports {
   bt_load_data(): void;
   bt_load_team(side: number, n: number): void;
   bt_read_team(side: number): void;
-  bt_start(trainer: number, double: number): number;
+  bt_start(trainer: number, double: number, weather: number): number;
   bt_state(): void;
   bt_set_action(slot: number, kind: number, a: number, b: number): void;
   bt_turn(): number;
@@ -87,7 +87,7 @@ export class Engine {
   btLoadData() { this.x.bt_load_data(); }
   btLoadTeam(side: number, n: number) { this.x.bt_load_team(side, n); }
   btReadTeam(side: number) { this.x.bt_read_team(side); }
-  btStart(trainer: boolean, double: boolean) { return this.x.bt_start(trainer ? 1 : 0, double ? 1 : 0); }
+  btStart(trainer: boolean, double: boolean, weather = 0) { return this.x.bt_start(trainer ? 1 : 0, double ? 1 : 0, weather); }
   btState() { this.x.bt_state(); }
   btSetAction(slot: number, kind: number, a: number, b: number) { this.x.bt_set_action(slot, kind, a, b); }
   btTurn() { return this.x.bt_turn(); }
@@ -111,9 +111,11 @@ export class Engine {
   getVar(name: string) { return this.x.vm_var_get(this.varId(name)); }
   setVar(name: string, v: number) { this.x.vm_var_set(this.varId(name), v | 0); }
   private strVars = new Map<string, string>();
+  /** Listas de texto de los scripts (viven en JS; se reinician con cada partida). */
+  readonly lists = new Map<string, string[]>();
   getStr(name: string) { return this.strVars.get(name); }
   setStr(name: string, text: string) { this.strVars.set(name, text); }
-  flagsReset() { this.flagIds.clear(); this.varIds.clear(); this.strVars.clear(); this.x.vm_flags_reset(); }
+  flagsReset() { this.flagIds.clear(); this.varIds.clear(); this.strVars.clear(); this.lists.clear(); this.x.vm_flags_reset(); }
   hasFlag(name: string) { return this.x.vm_flag_get(this.flagId(name)) === 1; }
   setFlag(name: string, on: boolean) { this.x.vm_flag_set(this.flagId(name), on ? 1 : 0); }
   vmLoad(words: Uint32Array) {

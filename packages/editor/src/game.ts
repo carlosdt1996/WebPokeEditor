@@ -29,7 +29,7 @@ export class Game {
   private fired = new Set<string>();
 
   constructor(private p: Project, private e: Engine, private host: Host) {
-    this.party = p.party.map((t) => makeMon(p, t.species, t.level));
+    this.party = p.party.map((t) => makeMon(p, t.species, t.level, t.held));
     this.inv = { ...p.inventory };
     e.flagsReset();
   }
@@ -40,6 +40,17 @@ export class Game {
     this.mapIndex = i;
     this.host.loadMap(i, this.p.start.x, this.p.start.y);
     void this.run(() => this.runMapEnter());
+  }
+
+  private async runMapExit() {
+    const src = this.map.onExit?.trim();
+    if (!src || this.enterDepth >= 5) return;
+    const r = parseScript(src);
+    if (!r.ok) { this.host.say(`Script de salida de ${this.map.name} con errores: ${r.errors[0]}`); return; }
+    this.enterDepth++;
+    try { this.refreshBuiltins(); await runScript(r.code, this.scriptCtx(null, null), this.e); }
+    catch (err) { this.host.say((err as Error).message); }
+    finally { this.enterDepth--; }
   }
 
   private enterDepth = 0;
@@ -111,6 +122,7 @@ export class Game {
   async warpTo(mapId: string, x: number, y: number) {
     const i = this.p.maps.findIndex((m) => m.id === mapId);
     if (i < 0) return;
+    await this.runMapExit();
     sfx("warp");
     this.mapIndex = i;
     this.host.loadMap(i, x, y);
@@ -155,13 +167,28 @@ export class Game {
       givemon: (sp, lv) => { if (this.party.length < 6) { this.party.push(makeMon(this.p, sp, lv)); sfx("catch"); this.host.say("¡Un nuevo compañero se une a tu equipo!"); } },
       warp: (m, x, y) => this.warpTo(m, x, y),
       choose: (o) => this.host.choose(o),
+      equip: (item) => this.equip(item),
     };
+  }
+
+  /** Equipa un objeto del inventario a la primera criatura sin objeto (si todas llevan uno, cambia el de la primera). */
+  private equip(itemId: string) {
+    const def = this.p.items.find((i) => i.id === itemId);
+    if (!def || def.kind !== "held") { this.host.say(`"${itemId}" no es un objeto equipable.`); return; }
+    if ((this.inv[itemId] ?? 0) <= 0) { this.host.say(`No tienes ${def.name}.`); return; }
+    const target = this.party.find((m) => !m.held) ?? this.party[0];
+    if (!target) return;
+    if (target.held) this.inv[target.held] = (this.inv[target.held] ?? 0) + 1;
+    this.inv[itemId]--;
+    target.held = itemId;
+    sfx("heal");
+    this.host.say(`${this.p.species.find((s) => s.id === target.species)?.name ?? "La criatura"} lleva ahora ${def.name}.`);
   }
 
   private async challenge(n: Npc) {
     this.npcDirs.set(this.key(n), n.x === this.e.cell.x ? (this.e.cell.y > n.y ? 0 : 1) : (this.e.cell.x > n.x ? 3 : 2));
     await this.host.dialog(n.name, n.lines.length ? n.lines : ["¡Combatamos!"]);
-    const foes = (n.team ?? []).map((t) => makeMon(this.p, t.species, t.level));
+    const foes = (n.team ?? []).map((t) => makeMon(this.p, t.species, t.level, t.held));
     if (!foes.length) return;
     const res = await this.fight(foes, n.name, n.double);
     if (res === "win") {
@@ -181,7 +208,7 @@ export class Game {
 
   private async fight(foes: Mon[], trainer?: string, double?: boolean) {
     if (!this.party.some((m) => m.hp > 0)) healAll(this.p, this.party);
-    const b = new Battle(this.p, this.e, this.party, foes, { trainer, double, inv: this.inv });
+    const b = new Battle(this.p, this.e, this.party, foes, { trainer, double, weather: this.map.weather, inv: this.inv });
     await this.host.battle(b);
     if (b.result === "lose") {
       healAll(this.p, this.party);

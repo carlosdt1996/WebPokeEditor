@@ -4,7 +4,7 @@ import { h } from "./dom";
 import { Engine } from "./engine";
 import { MapView, type Selection, type Tool } from "./mapView";
 import { SCRIPT_HELP, parseScript } from "./script";
-import { type Npc, type Project, type Warp, defaultProject, parseProject, saveLocal, uniqueId, validate } from "./project";
+import { WEATHER_KINDS, WEATHER_NAMES, type WeatherKind, type Npc, type Project, type Warp, defaultProject, parseProject, saveLocal, uniqueId, validate } from "./project";
 import { loadProject as loadStored, saveProject } from "./storage";
 import { ATLAS_COLS, ATLAS_ROWS, ERASE_OBJECT, TILE, TILE_DEFS, atlasFromDataUrl, atlasIndex, createAtlas } from "./tiles";
 import { exportGameHtml, runPlayer } from "./player";
@@ -172,6 +172,7 @@ async function main() {
           ...team.map((t, i) => h("div", { class: "row" },
             h("select", { onchange: (e: Event) => { t.species = (e.target as HTMLSelectElement).value; persist(); } }, ...project.species.map((sp) => h("option", { value: sp.id, selected: sp.id === t.species }, sp.name))),
             "Nv.", numIn(t.level, (v) => (t.level = Math.max(1, v)), 1, 100),
+            h("select", { title: "Objeto equipado", onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) t.held = v; else delete t.held; persist(); } }, h("option", { value: "" }, "sin objeto"), ...project.items.filter((x) => x.kind === "held").map((x) => h("option", { value: x.id, selected: t.held === x.id }, x.name))),
             h("button", { class: "danger", onclick: () => { team.splice(i, 1); persist(); renderInspector(s); } }, "✕"))),
           h("button", { disabled: team.length >= 6, onclick: () => { team.push({ species: project.species[0]?.id ?? "", level: 5 }); persist(); renderInspector(s); } }, "+ Criatura"),
           field("Tras perder", lines(n.defeatedLines, (a) => (n.defeatedLines = a))));
@@ -205,8 +206,13 @@ async function main() {
 
   // ---------- Script "al entrar al mapa" ----------
   const enterBox = h("div", { class: "enterbox" });
+  const exitBox = h("div", { class: "enterbox" });
+  const weatherSel = h("select", { onchange: () => { const v = weatherSel.value; if (v) view.map.weather = v as WeatherKind; else delete view.map.weather; persist(); } },
+    h("option", { value: "" }, "Sin clima"), ...WEATHER_KINDS.map((k) => h("option", { value: k }, WEATHER_NAMES[k])));
   const renderEnter = () => {
     enterBox.replaceChildren(...scriptEditor(() => view.map.onEnter ?? "", (v) => { view.map.onEnter = v.trim() ? v : undefined; }));
+    exitBox.replaceChildren(...scriptEditor(() => view.map.onExit ?? "", (v) => { view.map.onExit = v.trim() ? v : undefined; }));
+    weatherSel.value = view.map.weather ?? "";
   };
 
   // ---------- Barra superior y modos ----------
@@ -224,7 +230,9 @@ async function main() {
     h("div", { class: "row" }, mapSelect),
     h("div", { class: "row" }, h("button", { onclick: newMap }, "+ Nuevo"), h("button", { onclick: renameMap }, "Renombrar"), h("button", { class: "danger", onclick: deleteMap }, "Eliminar")),
     sizeBox, sizeInfo,
+    h("h3", {}, "Clima en combate"), weatherSel,
     h("h3", {}, "Al entrar al mapa"), enterBox,
+    h("h3", {}, "Al salir del mapa"), exitBox,
     h("h3", {}, "Inspector"), inspector,
     h("p", { class: "hint" }, "Rueda: zoom · Clic derecho / Espacio+arrastrar: mover · Ctrl+Z / Ctrl+Y: deshacer/rehacer · Supr: borrar selección"),
   );

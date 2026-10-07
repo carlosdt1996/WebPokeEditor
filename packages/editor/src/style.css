@@ -117,3 +117,4 @@ td.nw { white-space: nowrap; }
 
 .badge { margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px; font-style: normal; font-weight: 700; color: #fff; }
 .badge:empty { display: none; } .badge.st1 { background: #e65100; } .badge.st2 { background: #8e24aa; } .badge.st3 { background: #f9a825; color: #222; } .badge.st4 { background: #607d8b; } .badge.st5 { background: #29b6f6; color: #222; }
+.check.inline { display: inline-flex; margin-right: 6px; font-size: 12px; }

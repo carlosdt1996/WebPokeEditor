@@ -4,9 +4,9 @@
  * eventos devuelta a texto en español. Es reproducible por semilla (usa el mismo RNG que el mundo).
  */
 import type { Engine } from "./engine";
-import { BATTLE_STATS, BATTLE_STAT_NAMES, LIMITS, type Move, type Project, STATUS_KINDS, maxHp } from "./project";
+import { BATTLE_STATS, BATTLE_STAT_NAMES, LIMITS, type Move, type Project, STATUS_KINDS, WEATHER_KINDS, type WeatherKind, maxHp } from "./project";
 
-export interface Mon { species: string; level: number; hp: number; exp: number; moves: string[]; /** 0 = sano; 1…5 = índice+1 en STATUS_KINDS (persiste entre combates). */ status?: number }
+export interface Mon { species: string; level: number; hp: number; exp: number; moves: string[]; /** objeto equipado (id); se consume si es de un solo uso */ held?: string; /** 0 = sano; 1…5 = índice+1 en STATUS_KINDS (persiste entre combates). */ status?: number }
 
 export type Action =
   | { kind: "move"; index: number; /** slot rival (0/1); por defecto el primero en pie */ target?: number }
@@ -28,10 +28,10 @@ export { LIMITS };
 
 const expFor = (level: number) => level * level * 2;
 
-export function makeMon(p: Project, speciesId: string, level: number): Mon {
+export function makeMon(p: Project, speciesId: string, level: number, held?: string): Mon {
   const sp = p.species.find((s) => s.id === speciesId);
   if (!sp) throw new Error(`Especie inexistente: ${speciesId}`);
-  const m: Mon = { species: speciesId, level, hp: 0, exp: expFor(level), moves: sp.moves.slice(0, 4), status: 0 };
+  const m: Mon = { species: speciesId, level, hp: 0, exp: expFor(level), moves: sp.moves.slice(0, 4), status: 0, held };
   if (!m.moves.length && p.moves[0]) m.moves = [p.moves[0].id];
   m.hp = monMaxHp(p, m);
   return m;
@@ -43,10 +43,10 @@ export const healAll = (p: Project, party: Mon[]) => party.forEach((m) => { m.hp
 
 // Códigos del protocolo con Rust (deben coincidir con battle.rs)
 const A = { move: 1, switch: 2, heal: 3, ball: 4, run: 5, noitem: 6, cure: 7 };
-const E = { use: 1, miss: 2, hit: 3, faint: 4, exp: 5, level: 6, learn: 7, evolve: 8, sendout: 9, out: 10, in: 11, heal: 12, noitem: 13, throw: 14, catch: 15, ballFail: 16, runOk: 17, runFail: 18, noRun: 19, noCatch: 20, forceIn: 21, status: 22, stage: 23, cant: 24, wake: 25, thaw: 26, chip: 27, drain: 28, recoil: 29, selfHeal: 30, ability: 31, immune: 32, absorb: 33, cure: 34, noEffect: 35 };
+const E = { use: 1, miss: 2, hit: 3, faint: 4, exp: 5, level: 6, learn: 7, evolve: 8, sendout: 9, out: 10, in: 11, heal: 12, noitem: 13, throw: 14, catch: 15, ballFail: 16, runOk: 17, runFail: 18, noRun: 19, noCatch: 20, forceIn: 21, status: 22, stage: 23, cant: 24, wake: 25, thaw: 26, chip: 27, drain: 28, recoil: 29, selfHeal: 30, ability: 31, immune: 32, absorb: 33, cure: 34, noEffect: 35, charge: 36, recharge: 37, multi: 38, weather: 39, weatherEnd: 40, weatherChip: 41, terrain: 42, terrainEnd: 43, held: 44 };
 const EV_STRIDE = 17;
 const RESULTS: (BattleResult | null)[] = [null, "win", "lose", "run", "caught"];
-const MON_STRIDE = 10;
+const MON_STRIDE = 11;
 
 export class Battle {
   result: BattleResult | null = null;
@@ -58,19 +58,21 @@ export class Battle {
   startEvents: BattleEvent[] = [];
   private spIdx = new Map<string, number>();
   private mvIdx = new Map<string, number>();
+  private heldList: { id: string; name: string; kind: string }[] = [];
 
   constructor(
     private p: Project,
     private e: Engine,
     readonly party: Mon[],
     readonly foes: Mon[],
-    readonly opts: { trainer?: string; double?: boolean; inv: Record<string, number> },
+    readonly opts: { trainer?: string; double?: boolean; weather?: WeatherKind; inv: Record<string, number> },
   ) {
     p.species.forEach((s, i) => this.spIdx.set(s.id, i));
     p.moves.forEach((m, i) => this.mvIdx.set(m.id, i));
+    this.heldList = p.items.filter((i) => i.kind === "held").map((i) => ({ id: i.id, name: i.name, kind: i.hold?.kind ?? "" }));
     this.uploadData();
     this.uploadTeams();
-    this.size = this.e.btStart(!!opts.trainer, !!opts.double) === 2 ? 2 : 1;
+    this.size = this.e.btStart(!!opts.trainer, !!opts.double, opts.weather ? WEATHER_KINDS.indexOf(opts.weather) + 1 : 0) === 2 ? 2 : 1;
     this.syncState();
     this.startEvents = this.collect(this.e.btEventCount());
   }
@@ -97,17 +99,28 @@ export class Battle {
     if (p.species.length > LIMITS.species || p.moves.length > LIMITS.moves || p.types.length > LIMITS.types || abilities.length > LIMITS.abilities) throw new Error("El proyecto supera los límites del motor de combate (128 especies, 256 movimientos, 16 tipos, 64 habilidades).");
     let o = 0;
     const put = (...v: number[]) => { for (const x of v) io[o++] = x; };
-    put(p.types.length, p.moves.length, p.species.length, abilities.length);
+    const helds = p.items.filter((i) => i.kind === "held");
+    if (helds.length > LIMITS.helds) throw new Error("Demasiados objetos equipables (máximo 64).");
+    put(p.types.length, p.moves.length, p.species.length, abilities.length, helds.length);
     for (let a = 0; a < p.types.length; a++) for (let d = 0; d < p.types.length; d++) put(Math.round((p.typeChart[a]?.[d] ?? 1) * 100));
+    for (const w of WEATHER_KINDS) {
+      const r = p.weatherRules?.[w] ?? {};
+      const imm = (r.immune ?? []).slice(0, 4);
+      put(r.boost ?? -1, r.weaken ?? -1, r.chip ? 1 : 0, imm.length, imm[0] ?? -1, imm[1] ?? -1, imm[2] ?? -1, imm[3] ?? -1);
+    }
     for (const m of p.moves) {
       const e = m.effect ?? {};
       put(m.type, m.category === "special" ? 1 : 0, m.power, m.accuracy, e.priority ?? 0,
         e.status ? STATUS_KINDS.indexOf(e.status.kind) + 1 : 0, e.status?.chance ?? 0,
         e.stat ? BATTLE_STATS.indexOf(e.stat.stat) : -1, e.stat?.stages ?? 0, e.stat?.target === "foe" ? 1 : 0, e.stat?.chance ?? 100,
-        e.drain ?? 0, e.recoil ?? 0, e.heal ?? 0);
+        e.drain ?? 0, e.recoil ?? 0, e.heal ?? 0,
+        e.hits?.min ?? 1, e.hits?.max ?? 1, e.crit ?? 0, e.charge ? 1 : 0, e.recharge ? 1 : 0,
+        e.weather ? WEATHER_KINDS.indexOf(e.weather) + 1 : 0, e.terrain ? m.type : -1);
     }
-    const KIND: Record<string, number> = { immune: 1, absorb: 2, statusImmune: 3, intimidate: 4, pinch: 5, speedBoost: 6 };
-    for (const a of abilities) put(KIND[a.kind] ?? 0, a.kind === "statusImmune" ? STATUS_KINDS.indexOf(a.status ?? "burn") + 1 : (a.type ?? 0), a.amount ?? 0);
+    const KIND: Record<string, number> = { immune: 1, absorb: 2, statusImmune: 3, intimidate: 4, pinch: 5, speedBoost: 6, weather: 7 };
+    for (const a of abilities) put(KIND[a.kind] ?? 0, a.kind === "statusImmune" ? STATUS_KINDS.indexOf(a.status ?? "burn") + 1 : a.kind === "weather" ? WEATHER_KINDS.indexOf(a.weather ?? "sun") + 1 : (a.type ?? 0), a.amount ?? 0);
+    const HELD: Record<string, number> = { boost: 1, leftovers: 2, berry: 3, cureBerry: 4, focus: 5 };
+    for (const it of helds) put(HELD[it.hold?.kind ?? ""] ?? 0, it.hold?.type ?? 0, it.hold?.amount ?? 0);
     for (const s of p.species) {
       const st = s.stats;
       put(s.types[0] ?? 0, s.types[1] ?? -1, st.hp, st.atk, st.def, st.spa, st.spd, st.spe);
@@ -125,7 +138,7 @@ export class Battle {
     team.slice(0, 6).forEach((m, i) => {
       const mv = m.moves.map((id) => this.mvIdx.get(id)).filter((x): x is number => x !== undefined).slice(0, 4);
       const o = i * MON_STRIDE;
-      io.set([this.spIdx.get(m.species) ?? 0, m.level, m.hp, m.exp, mv.length, mv[0] ?? 0, mv[1] ?? 0, mv[2] ?? 0, mv[3] ?? 0, m.status ?? 0], o);
+      io.set([this.spIdx.get(m.species) ?? 0, m.level, m.hp, m.exp, mv.length, mv[0] ?? 0, mv[1] ?? 0, mv[2] ?? 0, mv[3] ?? 0, m.status ?? 0, m.held ? this.heldList.findIndex((h) => h.id === m.held) : -1], o);
     });
     this.e.btLoadTeam(side, Math.min(6, team.length));
   }
@@ -138,7 +151,7 @@ export class Battle {
     team.slice(0, 6).forEach((m, i) => {
       const o = i * MON_STRIDE;
       m.species = this.p.species[io[o]]?.id ?? m.species;
-      m.level = io[o + 1]; m.hp = io[o + 2]; m.exp = io[o + 3]; m.status = io[o + 9];
+      m.level = io[o + 1]; m.hp = io[o + 2]; m.exp = io[o + 3]; m.status = io[o + 9]; m.held = this.heldList[io[o + 10]]?.id;
       m.moves = Array.from({ length: io[o + 4] }, (_, k) => this.p.moves[io[o + 5 + k]]?.id).filter((x): x is string => !!x);
     });
   }
@@ -279,6 +292,21 @@ export class Battle {
           break;
         }
         case E.noEffect: push("No tendría ningún efecto."); break;
+        case E.charge: push(`¡${cap(slotName(a, b))} acumula energía!`); break;
+        case E.recharge: push(`¡${cap(slotName(a, b))} debe recuperarse!`); break;
+        case E.multi: push(`¡Golpeó ${c} veces!`); break;
+        case E.weather: push({ sun: "¡El sol brilla con fuerza!", rain: "¡Empieza a llover!", sand: "¡Se levanta una tormenta de arena!", hail: "¡Empieza a granizar!" }[WEATHER_KINDS[c - 1]] ?? "El clima cambia."); break;
+        case E.weatherEnd: push({ sun: "El sol vuelve a la normalidad.", rain: "La lluvia cesa.", sand: "La tormenta de arena amaina.", hail: "El granizo cesa." }[WEATHER_KINDS[c - 1]] ?? "El clima se calma."); break;
+        case E.weatherChip: push(`${cap(slotName(a, b))} sufre por ${d === 3 ? "la tormenta de arena" : "el granizo"}.`, "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.terrain: push(`Un terreno de tipo ${this.p.types[c] ?? "?"} cubre el campo.`); break;
+        case E.terrainEnd: push(`El terreno de tipo ${this.p.types[c] ?? "?"} desaparece.`); break;
+        case E.held: {
+          const h = this.heldList[c], amt = d & 0xffff, used = (d >> 16) > 0, who = cap(slotName(a, b));
+          const it = h?.name ?? "su objeto";
+          push(h?.kind === "leftovers" ? `${who} recupera ${amt} PS con ${it}.` : h?.kind === "berry" ? `¡${who} se come ${it} y recupera ${amt} PS!` : h?.kind === "cureBerry" ? `¡${who} se come ${it} y se cura!` : h?.kind === "focus" ? `¡${who} aguanta el golpe gracias a ${it}!` : `${who} usa ${it}.`, h?.kind === "focus" ? "weak" : "heal");
+          void used;
+          break;
+        }
       }
     }
     return out;

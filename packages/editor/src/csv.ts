@@ -1,5 +1,5 @@
 /** Importación/exportación CSV de especies y movimientos (para editarlos en hojas de cálculo). */
-import { BATTLE_STATS, STATUS_KINDS, STAT_KEYS, type BattleStat, type Move, type MoveEffect, type Project, type Species, type StatusKind } from "./project";
+import { BATTLE_STATS, STATUS_KINDS, STAT_KEYS, WEATHER_KINDS, type BattleStat, type Move, type MoveEffect, type Project, type Species, type StatusKind, type WeatherKind } from "./project";
 
 export function toCsv(rows: (string | number)[][]): string {
   const q = (v: string | number) => { const s = String(v); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -27,7 +27,7 @@ export function parseCsv(text: string): string[][] {
 
 const SPECIES_HEAD = ["id", "nombre", "tipo1", "tipo2", ...STAT_KEYS, "movimientos", "evoluciona_nivel", "evoluciona_en", "aprende", "habilidad"];
 const SPECIES_OPTIONAL = ["tipo2", "evoluciona_nivel", "evoluciona_en", "aprende", "habilidad"];
-const MOVE_HEAD = ["id", "nombre", "tipo", "categoria", "poder", "precision", "prioridad", "estado", "prob_estado", "estadistica", "etapas", "objetivo_estadistica", "prob_estadistica", "drenaje", "retroceso", "cura"];
+const MOVE_HEAD = ["id", "nombre", "tipo", "categoria", "poder", "precision", "prioridad", "estado", "prob_estado", "estadistica", "etapas", "objetivo_estadistica", "prob_estadistica", "drenaje", "retroceso", "cura", "golpes_min", "golpes_max", "critico", "carga", "recarga", "clima", "terreno"];
 const MOVE_OPTIONAL = MOVE_HEAD.slice(6);
 
 export function speciesToCsv(p: Project): string {
@@ -42,7 +42,8 @@ export function movesToCsv(p: Project): string {
     const e = m.effect ?? {};
     return [m.id, m.name, p.types[m.type] ?? "", m.category === "physical" ? "fisico" : "especial", m.power, m.accuracy,
       e.priority ?? "", e.status?.kind ?? "", e.status?.chance ?? "", e.stat?.stat ?? "", e.stat?.stages ?? "", e.stat ? (e.stat.target === "foe" ? "rival" : "usuario") : "", e.stat?.chance ?? "",
-      e.drain ?? "", e.recoil ?? "", e.heal ?? ""];
+      e.drain ?? "", e.recoil ?? "", e.heal ?? "",
+      e.hits?.min ?? "", e.hits?.max ?? "", e.crit ?? "", e.charge ? 1 : "", e.recharge ? 1 : "", e.weather ?? "", e.terrain ? 1 : ""];
   })]);
 }
 
@@ -101,6 +102,15 @@ export function movesFromCsv(p: Project, text: string): CsvResult<Move> {
     if (num("drenaje")) eff.drain = Math.max(0, Math.min(100, num("drenaje")!));
     if (num("retroceso")) eff.recoil = Math.max(0, Math.min(100, num("retroceso")!));
     if (num("cura")) eff.heal = Math.max(0, Math.min(100, num("cura")!));
+    if (num("golpes_max") && num("golpes_max")! > 1) eff.hits = { min: Math.max(1, Math.min(5, num("golpes_min") ?? 2)), max: Math.max(1, Math.min(5, num("golpes_max")!)) };
+    if (num("critico")) eff.crit = Math.max(0, Math.min(3, num("critico")!));
+    if (num("carga")) eff.charge = true;
+    if (num("recarga")) eff.recharge = true;
+    if (r.get("clima")) {
+      if (!WEATHER_KINDS.includes(r.get("clima") as WeatherKind)) errors.push(`línea ${r.n}: clima desconocido "${r.get("clima")}" (${WEATHER_KINDS.join(", ")})`);
+      else eff.weather = r.get("clima") as WeatherKind;
+    }
+    if (num("terreno")) eff.terrain = true;
     if (Object.keys(eff).length) mv.effect = eff;
     items.push(mv);
   }

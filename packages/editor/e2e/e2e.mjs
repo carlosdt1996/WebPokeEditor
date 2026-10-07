@@ -278,6 +278,50 @@ await test("combate: el estado Sueño se muestra como insignia y los efectos fun
   await W(page, () => window.__wpe.view.game.party.forEach((m) => { m.hp = 60; }));
 });
 
+await test("listas y operaciones con texto en un disparador", async () => {
+  await W(page, () => window.__wpe.view.game.warpTo("pueblo", 11, 4));
+  await W(page, () => window.__wpe.project.maps[0].triggers.push({ x: 11, y: 5, name: "Listas", once: false, script: "list frutas manzana | pera | uva\npush frutas kiwi\nlen frutas n\nget frutas 3 f\nupper f\nstreq f KIWI ok\nsay {n} frutas, la última es {f} ({ok})" }));
+  await page.waitForTimeout(200);
+  await holdUntil(page, "ArrowDown", cell(11, 5));
+  await page.waitForSelector(".dialog:not([hidden])");
+  assert((await page.textContent(".dialog")).includes("4 frutas, la última es KIWI (1)"), "texto: " + (await page.textContent(".dialog")));
+  await closeDialog(page);
+  await W(page, () => window.__wpe.project.maps[0].triggers.pop());
+});
+
+await test("script al salir del mapa y equipar un objeto desde un script", async () => {
+  await W(page, () => { window.__wpe.project.maps[0].onExit = "equip carbon\nsay (Sistema) Te llevas el carbón."; });
+  const had = await W(page, () => window.__wpe.view.game.party.map((m) => m.held ?? null));
+  await W(page, () => window.__wpe.view.game.warpTo("casa", 5, 6));
+  await page.waitForSelector(".dialog:not([hidden])");
+  assert((await page.textContent(".dialog")).includes("Te llevas el carbón"), "script de salida: " + (await page.textContent(".dialog")));
+  await closeDialog(page);
+  const after = await W(page, () => window.__wpe.view.game.party.map((m) => m.held ?? null));
+  assert(JSON.stringify(after) !== JSON.stringify(had) && after.includes("carbon"), "alguien lleva el carbón: " + JSON.stringify(after));
+  await W(page, () => { delete window.__wpe.project.maps[0].onExit; });
+  await W(page, () => window.__wpe.view.game.warpTo("pueblo", 5, 5));
+  await closeDialog(page).catch(() => {});
+});
+
+await test("clima del mapa: se anuncia al empezar el combate", async () => {
+  await W(page, () => {
+    const g = window.__wpe.view.game;
+    g.map.weather = "rain";
+    g.party.forEach((m) => { m.hp = 999; });
+    g.fight([{ species: "pelusin", level: 3, hp: 30, exp: 1, moves: ["embestida"], status: 0 }]);
+  });
+  await page.waitForSelector(".battle");
+  await page.waitForFunction(() => document.querySelector(".battle .msg")?.textContent?.includes("llover"), null, { timeout: 8000 });
+  await W(page, () => { delete window.__wpe.view.game.map.weather; });
+  for (let i = 0; i < 80 && (await page.locator(".battle").count()); i++) {
+    const fight = page.locator(".menu button:has-text('Luchar')");
+    if (await fight.count()) { await fight.click(); await page.locator(".menu button").first().click(); }
+    await page.waitForTimeout(150);
+    await page.locator(".battle").click({ position: { x: 20, y: 20 } }).catch(() => {});
+  }
+  assert(!(await page.locator(".battle").count()), "el combate no terminó");
+});
+
 await test("NPC de conversación y curandero", async () => {
   await W(page, () => window.__wpe.view.game.warpTo("casa", 7, 4));
   await page.waitForTimeout(200);
@@ -489,7 +533,10 @@ await test("editor: habilidades, efectos de movimientos y script al entrar al ma
   if (await page.locator("text=■ Detener").count()) await page.click("text=■ Detener");
   await page.click("button:has-text('📋 Datos')");
   eq(await W(page, () => window.__wpe.project.species.find((s) => s.id === "flamito").ability), "mar-llamas", "habilidad por defecto");
-  assert(await page.locator("h2:has-text('Habilidades')").count() === 1 && await page.locator("h2:has-text('Efectos de los movimientos')").count() === 1, "secciones nuevas");
+  assert(await page.locator("h2:has-text('Habilidades')").count() === 1 && await page.locator("h2:has-text('Efectos de los movimientos')").count() === 1 && await page.locator("h2:has-text('Reglas de clima')").count() === 1, "secciones nuevas");
+  eq(await W(page, () => window.__wpe.project.weatherRules.rain.boost), 2, "regla de lluvia por defecto (Agua)");
+  assert(await page.locator("option:has-text('Equipable')").count() > 0, "tipo de objeto equipable disponible");
+  eq(await W(page, () => window.__wpe.project.items.filter((i) => i.kind === "held").length), 4, "objetos equipables por defecto");
   const n0 = await W(page, () => window.__wpe.project.abilities.length);
   await page.click("button:has-text('+ Añadir habilidad')");
   eq(await W(page, () => window.__wpe.project.abilities.length), n0 + 1, "habilidad añadida");
@@ -497,12 +544,21 @@ await test("editor: habilidades, efectos de movimientos y script al entrar al ma
   await page.click("button:has-text('🗺️ Mapa')");
   await page.selectOption(".side select.grow", "1");
   await page.waitForTimeout(200);
-  assert((await page.locator(".enterbox textarea.code").inputValue()).includes("mama_saluda"), "el script de entrada de la casa se muestra");
-  await page.locator(".enterbox textarea.code").fill("say hola");
+  assert((await page.locator(".enterbox").first().locator("textarea.code").inputValue()).includes("mama_saluda"), "el script de entrada de la casa se muestra");
+  await page.locator(".enterbox").first().locator("textarea.code").fill("say hola");
   eq(await W(page, () => window.__wpe.view.map.onEnter), "say hola", "se guarda en el mapa");
-  await page.locator(".enterbox textarea.code").fill("");
+  await page.locator(".enterbox").first().locator("textarea.code").fill("");
   eq(await W(page, () => window.__wpe.view.map.onEnter), undefined, "vacío = sin script");
-  await page.locator(".enterbox textarea.code").fill("if mama_saluda\nreturn\nend\nflag mama_saluda\nsay (Mamá) ¡Has vuelto a casa!");
+  await page.locator(".enterbox").first().locator("textarea.code").fill("if mama_saluda\nreturn\nend\nflag mama_saluda\nsay (Mamá) ¡Has vuelto a casa!");
+  // script de salida y clima del mapa desde la barra lateral
+  await page.locator(".enterbox").nth(1).locator("textarea.code").fill("say adiós");
+  eq(await W(page, () => window.__wpe.view.map.onExit), "say adiós", "script de salida guardado");
+  await page.locator(".enterbox").nth(1).locator("textarea.code").fill("");
+  eq(await W(page, () => window.__wpe.view.map.onExit), undefined, "vacío = sin script de salida");
+  await page.selectOption(".side select:has(option:text('Sin clima'))", "sand");
+  eq(await W(page, () => window.__wpe.view.map.weather), "sand", "clima del mapa");
+  await page.selectOption(".side select:has(option:text('Sin clima'))", "");
+  eq(await W(page, () => window.__wpe.view.map.weather), undefined, "sin clima");
   await page.selectOption(".side select.grow", "0");
 });
 
@@ -565,7 +621,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   const path = join(tmpdir(), "e2e-proyecto.wpe.json");
   await dl.saveAs(path);
   const json = JSON.parse(readFileSync(path, "utf8"));
-  eq([json.name, json.schemaVersion, json.maps.length, json.items.length], ["Proyecto E2E", 4, 3, 5], "contenido exportado");
+  eq([json.name, json.schemaVersion, json.maps.length, json.items.length], ["Proyecto E2E", 5, 3, 9], "contenido exportado");
   await page.click("button:has-text('Nuevo')");
   await page.waitForTimeout(400);
   eq(await W(page, () => window.__wpe.project.name), "Mi Fangame", "tras Nuevo");
@@ -576,7 +632,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   const p1 = join(tmpdir(), "e2e-v1.json"); writeFileSync(p1, JSON.stringify(v1));
   await page.locator("header input[type=file]").setInputFiles(p1);
   await page.waitForFunction(() => window.__wpe.project.name === "Antiguo");
-  eq(await W(page, () => [window.__wpe.project.schemaVersion, window.__wpe.project.maps[0].w]), [4, 6], "migración v1→v4");
+  eq(await W(page, () => [window.__wpe.project.schemaVersion, window.__wpe.project.maps[0].w]), [5, 6], "migración v1→v5");
   // JSON inválido → mensaje y el proyecto no cambia
   const bad = join(tmpdir(), "e2e-bad.json"); writeFileSync(bad, JSON.stringify({ ...v1, encounters: ["fantasma"] }));
   let msg = ""; page.removeAllListeners("dialog"); page.on("dialog", (d) => { msg = d.message(); d.accept(); });

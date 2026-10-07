@@ -337,6 +337,8 @@ pub const VM_WARP: u32 = 6;
 pub const VM_CHOICE: u32 = 7;
 /// a = nombre, b = texto (índices de la tabla de cadenas): variable de texto, resuelta por el host.
 pub const VM_SETSTR: u32 = 8;
+/// a = índice de una cadena `orden␁arg␁arg…` que el host ejecuta (listas, texto, equipar objetos…).
+pub const VM_HOST: u32 = 9;
 pub const VM_STACK: usize = 16;
 pub const VM_ERR: u32 = 255;
 
@@ -385,7 +387,7 @@ impl Vm {
             let (op, a, b, c) = (self.code[i], self.code[i + 1], self.code[i + 2], self.code[i + 3]);
             self.pc += 1;
             match op {
-                VM_SAY | VM_GIVE | VM_HEAL | VM_BATTLE | VM_GIVEMON | VM_WARP | VM_CHOICE | VM_SETSTR => {
+                VM_SAY | VM_GIVE | VM_HEAL | VM_BATTLE | VM_GIVEMON | VM_WARP | VM_CHOICE | VM_SETSTR | VM_HOST => {
                     self.args = [a, b, c];
                     return op;
                 }

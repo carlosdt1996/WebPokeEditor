@@ -28,7 +28,7 @@ Leyenda: `[x]` hecho · `[~]` parcial (MVP) · `[ ]` pendiente
 
 ## Fase 4 — Combate
 - [x] Combate determinista 1v1 y 2v2 jugable, simulado en Rust (ver battle-system.md)
-- [x] Habilidades, estados alterados y efectos de movimientos mediante datos
+- [x] Habilidades, estados alterados, clima, terreno, objetos equipables y efectos de movimientos mediante datos
 - [~] UI de combate (animaciones básicas)
 
 ## Fase 5 — Exportación y comunidad

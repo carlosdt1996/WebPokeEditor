@@ -22,7 +22,8 @@ export type Instr =
   | { op: "call"; name: string; to: number }
   | { op: "ret" }
   | { op: "choice"; options: string[] }
-  | { op: "setstr"; name: string; text: string };
+  | { op: "setstr"; name: string; text: string }
+  | { op: "host"; cmd: string; args: string[] };
 
 export const SCRIPT_HELP = `say <texto>            muestra un mensaje; {var} se sustituye por el valor de la variable
 give <objeto> <n>      da objetos (ids de la pestaña Datos: potion, ball...)
@@ -38,6 +39,13 @@ break                          sale del bucle más interno
 def <nombre> ... end           define una función; call <nombre> la ejecuta; return sale de ella
 choice <A> | <B> | <C>         menú de opciones; guarda el índice elegido (0, 1, 2…) en la variable choice
 setstr <nombre> <texto>        variable de texto; se usa como {nombre} en say y choice
+list <nombre> a | b | c        crea una lista de textos; push/pop/clear <lista> [valor]
+len <lista> <var>              guarda el nº de elementos en una variable
+get <lista> <índice|var> <txt> copia el elemento (0, 1, 2… o una variable) a una variable de texto
+pick <lista> <txt>             elige un elemento al azar (reproducible)
+upper <txt> · lower <txt>      cambia a mayúsculas/minúsculas · strlen <txt> <var> longitud
+streq <txt> <texto> <var>      var = 1 si el texto es igual · contains <txt> <texto> <var> si lo contiene
+equip <objeto>                 equipa un objeto del inventario a la primera criatura libre
 battle <especie> <nivel>   combate contra una criatura
 givemon <especie> <nivel>  añade una criatura al equipo
 warp <mapa> <x> <y>        teletransporta al jugador
@@ -146,6 +154,30 @@ export function parseScript(src: string): ParseResult {
         if (opts.length < 2 || opts.length > 6) err("choice necesita entre 2 y 6 opciones separadas por |"); else code.push({ op: "choice", options: opts });
         break;
       }
+      case "list": {
+        const n = ident(rest[0]);
+        const vals = rest.slice(1).join(" ").split("|").map((x) => x.trim()).filter(Boolean);
+        if (!vals.length) { err("uso: list <nombre> a | b | c"); break; }
+        if (n) code.push({ op: "host", cmd: "list", args: [n, ...vals] });
+        break;
+      }
+      case "push": { const n = ident(rest[0]); if (!rest[1]) { err("uso: push <lista> <valor>"); break; } if (n) code.push({ op: "host", cmd: "push", args: [n, rest.slice(1).join(" ")] }); break; }
+      case "pop": case "clear": { const n = ident(rest[0]); if (n) code.push({ op: "host", cmd: cmd, args: [n] }); break; }
+      case "len": case "strlen": case "pick": case "upper": case "lower": {
+        const want = cmd === "upper" || cmd === "lower" ? 1 : 2;
+        const n = ident(rest[0]), v = want === 2 ? ident(rest[1]) : "";
+        if (rest.length < want) { err(`uso: ${cmd} ${want === 2 ? "<nombre> <variable>" : "<texto>"}`); break; }
+        if (n && v !== null) code.push({ op: "host", cmd, args: want === 2 ? [n, v] : [n] });
+        break;
+      }
+      case "get": { const l = ident(rest[0]), t = ident(rest[2]); if (!rest[1]) { err("uso: get <lista> <índice|var> <texto>"); break; } if (l && t) code.push({ op: "host", cmd: "get", args: [l, rest[1], t] }); break; }
+      case "streq": case "contains": {
+        const n = ident(rest[0]), v = ident(rest[rest.length - 1]);
+        if (rest.length < 3) { err(`uso: ${cmd} <txt> <texto> <variable>`); break; }
+        if (n && v) code.push({ op: "host", cmd, args: [n, rest.slice(1, -1).join(" "), v] });
+        break;
+      }
+      case "equip": { const n = ident(rest[0]); if (n) code.push({ op: "host", cmd: "equip", args: [n] }); break; }
       case "break": {
         let loop: Frame | undefined;
         for (let k = stack.length - 1; k >= 0 && stack[k].kind !== "def"; k--) if (stack[k].kind !== "if") { loop = stack[k]; break; }
@@ -201,10 +233,12 @@ export interface ScriptCtx {
   warp(map: string, x: number, y: number): Promise<void>;
   /** Muestra un menú y devuelve el índice elegido. */
   choose(options: string[]): Promise<number>;
+  /** Equipa un objeto a una criatura del equipo. */
+  equip(item: string): void;
 }
 
 /** Códigos de operación del bytecode (deben coincidir con crates/engine-core). */
-const OP = { say: 1, give: 2, heal: 3, battle: 4, givemon: 5, warp: 6, choice: 7, setstr: 8, flag: 10, unflag: 11, jif: 12, jmp: 13, set: 20, add: 21, cmp: 22, jnc: 23, call: 30, ret: 31 } as const;
+const OP = { say: 1, give: 2, heal: 3, battle: 4, givemon: 5, warp: 6, choice: 7, setstr: 8, host: 9, flag: 10, unflag: 11, jif: 12, jmp: 13, set: 20, add: 21, cmp: 22, jnc: 23, call: 30, ret: 31 } as const;
 
 /** Compila las instrucciones a bytecode de 4 palabras + tabla de cadenas (la VM solo maneja números). */
 export function compileScript(code: Instr[], engine: Pick<Engine, "flagId" | "varId">): { words: Uint32Array; strings: string[] } {
@@ -237,6 +271,7 @@ export function compileScript(code: Instr[], engine: Pick<Engine, "flagId" | "va
       case "ret": put(k, [OP.ret, 0, 0, 0]); break;
       case "choice": put(k, [OP.choice, sid(ins.options.join("|")), 0, 0]); break;
       case "setstr": put(k, [OP.setstr, sid(ins.name), sid(ins.text), 0]); break;
+      case "host": put(k, [OP.host, sid([ins.cmd, ...ins.args].join("\u0001")), 0, 0]); break;
     }
   });
   return { words, strings };
@@ -253,7 +288,8 @@ export async function runScript(code: Instr[], ctx: ScriptCtx, engine: Engine, m
     const ev = engine.vmRun();
     const interp = (t: string) => t.replace(/\{([A-Za-z_][\w-]*)\}/g, (_, n: string) => engine.getStr(n) ?? String(engine.getVar(n)));
     if (ev === OP.say) { lines.push(interp(strings[engine.vmArg(0)])); continue; }
-    await flush();
+    // las operaciones puras (texto, listas) no interrumpen el cuadro de diálogo: los `say` contiguos siguen agrupados
+    if (ev !== OP.setstr && ev !== OP.host) await flush();
     if (ev === 0) return;
     if (ev === 255) throw new Error("Error en la VM de scripts (¿bucle infinito sin acciones?)");
     const a = engine.vmArg(0), b = engine.vmArg(1), c = engine.vmArg(2);
@@ -262,7 +298,31 @@ export async function runScript(code: Instr[], ctx: ScriptCtx, engine: Engine, m
     else if (ev === OP.battle) await ctx.battle(strings[a], b);
     else if (ev === OP.givemon) ctx.givemon(strings[a], b);
     else if (ev === OP.setstr) engine.setStr(strings[a], interp(strings[b]));
+    else if (ev === OP.host) hostOp(strings[a].split("\u0001"), engine, interp, ctx);
     else if (ev === OP.choice) engine.setVar("choice", await ctx.choose(strings[a].split("|").map(interp)));
     else if (ev === OP.warp) { await ctx.warp(strings[a], b, c); return; } // el mapa cambia: termina el script
+  }
+}
+
+/** Orden de host: listas, operaciones con texto y equipar objetos. Las listas y los textos viven en el motor (JS); las variables numéricas, en la VM. */
+function hostOp(parts: string[], engine: Engine, interp: (t: string) => string, ctx: ScriptCtx) {
+  const [cmd, ...a] = parts;
+  const list = (n: string) => engine.lists.get(n) ?? engine.lists.set(n, []).get(n)!;
+  const str = (n: string) => engine.getStr(n) ?? "";
+  const idxOf = (v: string) => (/^-?\d+$/.test(v) ? +v : engine.getVar(v));
+  switch (cmd) {
+    case "list": engine.lists.set(a[0], a.slice(1).map(interp)); break;
+    case "push": list(a[0]).push(interp(a[1])); break;
+    case "pop": list(a[0]).pop(); break;
+    case "clear": engine.lists.set(a[0], []); break;
+    case "len": engine.setVar(a[1], list(a[0]).length); break;
+    case "get": { const l = list(a[0]), i = idxOf(a[1]); engine.setStr(a[2], l[i] ?? ""); break; }
+    case "pick": { const l = list(a[0]); engine.setStr(a[1], l.length ? l[engine.rand(l.length)] : ""); break; }
+    case "upper": engine.setStr(a[0], str(a[0]).toUpperCase()); break;
+    case "lower": engine.setStr(a[0], str(a[0]).toLowerCase()); break;
+    case "strlen": engine.setVar(a[1], str(a[0]).length); break;
+    case "streq": engine.setVar(a[2], str(a[0]) === interp(a[1]) ? 1 : 0); break;
+    case "contains": engine.setVar(a[2], str(a[0]).includes(interp(a[1])) ? 1 : 0); break;
+    case "equip": ctx.equip(a[0]); break;
   }
 }

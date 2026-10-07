@@ -17,3 +17,6 @@ Mantener TS (más simple, pero la lógica no sería portable); un crate/`.wasm` 
 
 ## Actualización: efectos, estados y habilidades
 El mismo protocolo se amplió con efectos de movimientos, estados alterados, etapas y habilidades definidos por datos (tablas de 14 enteros por movimiento y 3 por habilidad; la especie lleva su habilidad). Cada evento lleva ahora una instantánea de índice, PS y **estado** por casilla (17 enteros por evento). Los volátiles del combate (etapas y turnos de sueño) viven solo en Rust, por eso el host sube los equipos en cada turno sin tocarlos.
+
+## Actualización: clima, terreno, objetos equipables y movimientos avanzados
+El protocolo pasó a 5 cabeceras, una tabla de reglas de clima (4×8), movimientos de 21 enteros y criaturas de 11 (con objeto equipado). Los volátiles nuevos (carga, recarga, clima y terreno) también viven solo en Rust. `bt_start` recibe el clima del mapa. Los objetos equipables de un solo uso se consumen en Rust y el host refleja el cambio en `Mon.held` al leer el equipo de vuelta.
