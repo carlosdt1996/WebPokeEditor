@@ -292,15 +292,16 @@ await test("listas y operaciones con texto en un disparador", async () => {
 await test("script al salir del mapa y equipar un objeto desde un script", async () => {
   await W(page, () => { window.__wpe.project.maps[0].onExit = "equip carbon\nsay (Sistema) Te llevas el carbón."; });
   const had = await W(page, () => window.__wpe.view.game.party.map((m) => m.held ?? null));
-  await W(page, () => window.__wpe.view.game.warpTo("casa", 5, 6));
+  await W(page, () => { void window.__wpe.view.game.warpTo("casa", 5, 6); }); // sin esperar: el script de salida abre un diálogo
   await page.waitForSelector(".dialog:not([hidden])");
   assert((await page.textContent(".dialog")).includes("Te llevas el carbón"), "script de salida: " + (await page.textContent(".dialog")));
   await closeDialog(page);
   const after = await W(page, () => window.__wpe.view.game.party.map((m) => m.held ?? null));
   assert(JSON.stringify(after) !== JSON.stringify(had) && after.includes("carbon"), "alguien lleva el carbón: " + JSON.stringify(after));
   await W(page, () => { delete window.__wpe.project.maps[0].onExit; });
-  await W(page, () => window.__wpe.view.game.warpTo("pueblo", 5, 5));
-  await closeDialog(page).catch(() => {});
+  await W(page, () => { void window.__wpe.view.game.warpTo("pueblo", 5, 5); });
+  await page.waitForTimeout(300);
+  if (await page.locator(".dialog:not([hidden])").count()) await closeDialog(page);
 });
 
 await test("clima del mapa: se anuncia al empezar el combate", async () => {
