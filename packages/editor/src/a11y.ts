@@ -35,17 +35,36 @@ export function accessibleName(el: Element): string {
 
 const NEEDS_NAME = "button, input:not([type=hidden]), select, textarea, a[href]";
 
-/** Da nombre accesible a lo que no lo tiene: usa el texto de la etiqueta o fila contigua, o el valor/placeholder. */
+/** Texto corto de una etiqueta sin copiar subárboles grandes: solo nodos de texto directos y hermanos inmediatos. */
+function nearbyText(el: Element): string {
+  const short = (t: string | null | undefined) => { const v = (t ?? "").replace(/\s+/g, " ").trim(); return v && v.length <= 60 ? v : ""; };
+  const label = el.closest("label");
+  if (label) {
+    const own = [...label.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join(" ");
+    const v = short(own) || short(label.textContent);
+    if (v) return v;
+  }
+  const prev = el.previousSibling;
+  const pv = short(prev?.nodeType === Node.TEXT_NODE ? prev.textContent : (prev as Element | null)?.textContent);
+  if (pv) return pv;
+  const parent = el.parentElement;
+  if (parent && parent.children.length <= 6) {
+    const own = short([...parent.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join(" "));
+    if (own) return own;
+  }
+  const td = el.closest("td");
+  const table = td?.closest("table");
+  const head = td && table?.tHead?.rows[0]?.cells[(td as HTMLTableCellElement).cellIndex];
+  const hv = short(head?.textContent);
+  if (hv) return hv;
+  const row = td?.parentElement?.querySelector("b, input[type=text]");
+  return short((row as HTMLInputElement | null)?.value ?? row?.textContent);
+}
+
+/** Da nombre accesible a lo que no lo tiene (coste constante por control). */
 function nameIt(el: Element) {
   if (accessibleName(el)) return;
-  const row = el.closest("label, .row, .field, td, th, p, div");
-  let t = "";
-  if (row) {
-    const clone = row.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll("input, select, textarea, button").forEach((n) => n.remove());
-    t = (clone.textContent ?? "").trim().slice(0, 60);
-  }
-  if (!t) { const prev = el.previousElementSibling?.textContent?.trim(); if (prev) t = prev.slice(0, 60); }
+  let t = nearbyText(el);
   if (!t && el instanceof HTMLInputElement) t = el.type === "number" ? "valor numérico" : el.type === "checkbox" ? "casilla" : el.type === "file" ? "archivo" : "campo de texto";
   if (!t && el instanceof HTMLSelectElement) t = "selección";
   if (!t && el instanceof HTMLButtonElement) t = "botón";

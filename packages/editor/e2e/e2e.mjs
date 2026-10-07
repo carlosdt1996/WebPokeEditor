@@ -781,7 +781,6 @@ await test("packs: exportar mapas y criaturas de un proyecto e importarlos en ot
   const before = await W(page, () => window.__wpe.project.maps.length);
   await page.click("nav.tabs button:has-text('Datos')");
   await page.waitForSelector("h2:has-text('Packs')");
-  page.once("dialog", (d) => { void d.accept(); });
   await page.locator("h2:has-text('Packs')").locator("xpath=following::input[@type='file'][1]").setInputFiles(packPath);
   await page.waitForFunction((n) => window.__wpe.project.maps.length === n + 1, before, { timeout: 8000 });
   eq(await W(page, () => window.__wpe.project.maps.some((m) => m.id === "brisa")), true, "mapa importado");

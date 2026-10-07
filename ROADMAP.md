@@ -33,18 +33,20 @@ Leyenda: `[x]` hecho · `[~]` parcial (MVP) · `[ ]` pendiente
 
 ## Fase 5 — Exportación y comunidad
 - [x] Export: proyecto JSON, juego autocontenido `.html` y la propia app como PWA
-- [ ] Export de escritorio (Tauri/Electron) opcional
-- [ ] Sistema de plugins/mods
-- [ ] Compartir proyectos, plantillas y tilesets
+- [~] Export de escritorio (Tauri/Electron) opcional: guía en docs/guides/exportar-escritorio.md; sin empaquetado propio
+- [x] Mods mediante packs de datos (sin código ejecutable por seguridad)
+- [x] Compartir plantillas, contenido y tilesets mediante packs `.wpe-pack.json`
 
 ## Fase 6 — Pulido
 - [x] Modo 3D estilo DS (vista)
 - [x] Pruebas E2E en navegador
 - [x] Audio sintetizado (SFX + música)
-- [ ] Rendimiento, accesibilidad, i18n
-- [ ] Documentación de usuario y tutoriales
+- [x] Accesibilidad (ARIA, teclado, movimiento reducido) e i18n español/inglés
+- [x] Pruebas de rendimiento del núcleo (presupuestos en perf.test.ts)
+- [x] Documentación de usuario y tutoriales (docs/guides)
 
 ## Contenido
-- [x] Plantilla «Archipiélago de la Marea»: 21 mapas, 4 gimnasios, Liga y progresión por medallas
-- [ ] Más regiones/plantillas originales (cuatro gimnasios más, bosque, desierto, ciudad grande)
-- [ ] Sistema de dinero en el motor (hoy es una variable de script) y objetos clave
+- [x] Plantilla «Archipiélago de la Marea»: 38 mapas, 8 gimnasios, Liga, rival, equipo villano y progresión por medallas
+- [x] Plantilla «Valle del Alba»: región corta con 4 ciudades y campeona
+- [x] Segunda región original y mecánicas de combate adicionales (protección, atrapar, amedrentar, forzar cambio, transformación)
+- [x] Dinero propio del juego, tiendas y objetos clave (esquema v6)

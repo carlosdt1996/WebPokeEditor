@@ -7,7 +7,7 @@ Creador de **fangames de Pokémon** que corre íntegramente en el navegador, usa
 > Estado: MVP funcional. Ver [`ROADMAP.md`](ROADMAP.md).
 
 ## Qué hay ya
-- **Plantilla de región completa «Archipiélago de la Marea»** (original): 38 mapas, 20 criaturas con evoluciones, 8 gimnasios con medalla, rival recurrente, equipo villano con guarida y objeto clave, pesca, Liga con 3 maestros y un campeón, centros de curación, tiendas con dinero, cueva con tesoros, climas por zona y puertas que exigen medallas. Se elige en **Nuevo → plantilla**.
+- **Dos plantillas originales**: «Valle del Alba» (región corta) y la región completa **«Archipiélago de la Marea»** (original): 38 mapas, 20 criaturas con evoluciones, 8 gimnasios con medalla, rival recurrente, equipo villano con guarida y objeto clave, pesca, Liga con 3 maestros y un campeón, centros de curación, tiendas con dinero, cueva con tesoros, climas por zona y puertas que exigen medallas. Se elige en **Nuevo → plantilla**.
 - **Editor de mapas** con varios mapas por proyecto y **tres capas** (suelo, objetos con transparencia y colisión propia, y alturas para el 3D): pintar, rellenar, cuentagotas, elevar/bajar, deshacer/rehacer, zoom/pan, redimensionar. **Tiles animados** (agua, hierba alta).
 - **NPCs** (conversación, entrenadores con equipo propio, curanderos y **scripts de eventos** ejecutados por una **VM en Rust/WASM** (mensajes con `{variables}`, objetos, marcas y variables numéricas persistentes, condicionales, bucles, combates, warps) **funciones**, **menús de elección**, textos, **listas**, operaciones con texto, **script al entrar y al salir del mapa**, **script al entrar al mapa** y **disparadores por casilla**) y **saltos entre mapas** (puertas, rutas) con inspector.
 - **Modo Probar**: caminas por el mundo, hablas con NPCs, te ven los entrenadores, hay encuentros en hierba alta y combates por turnos jugables, **1v1 y 2v2** (movimientos, tipos, STAB, críticos, **estados alterados, cambios de estadística (incluida precisión/evasión), habilidades, clima, terreno, multigolpe, carga/recarga y objetos equipables definidos por datos**, objetos configurables, cambio, huida, captura, experiencia, subida de nivel, movimientos por nivel y evoluciones).
@@ -53,6 +53,12 @@ Una herramienta tipo "RPG Maker para Pokémon" sin instalación: editas mapas, P
 | [`docs/formats/map-format.md`](docs/formats/map-format.md) | Formato de mapas y tilesets |
 | [`docs/guides/development-setup.md`](docs/guides/development-setup.md) | Entorno de desarrollo |
 | [`docs/guides/testing.md`](docs/guides/testing.md) | Estrategia de pruebas |
+| [`docs/guides/tutorial-primer-juego.md`](docs/guides/tutorial-primer-juego.md) | Tutorial: tu primer juego |
+| [`docs/guides/tutorial-scripts.md`](docs/guides/tutorial-scripts.md) | Tutorial: scripts de eventos |
+| [`docs/guides/tutorial-datos-y-combate.md`](docs/guides/tutorial-datos-y-combate.md) | Tutorial: datos y combate |
+| [`docs/guides/packs.md`](docs/guides/packs.md) | Packs: compartir contenido |
+| [`docs/guides/accesibilidad-e-idiomas.md`](docs/guides/accesibilidad-e-idiomas.md) | Accesibilidad e idiomas |
+| [`docs/guides/exportar-escritorio.md`](docs/guides/exportar-escritorio.md) | Aplicación de escritorio (opcional) |
 | [`docs/guides/legal-and-assets.md`](docs/guides/legal-and-assets.md) | Aspectos legales y assets |
 | [`docs/adr/`](docs/adr/) | Decisiones de arquitectura (ADR) |
 
