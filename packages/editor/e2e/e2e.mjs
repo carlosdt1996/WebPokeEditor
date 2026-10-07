@@ -433,7 +433,9 @@ await test("PWA: manifest, service worker y funcionamiento sin conexión", async
   await page.context().setOffline(false);
   const cdp = await page.context().newCDPSession(page);
   const inst = await cdp.send("Page.getInstallabilityErrors");
-  assert(inst.installabilityErrors.length === 0, "la PWA no es instalable: " + JSON.stringify(inst.installabilityErrors));
+  // "in-incognito" lo causa el contexto efímero de Playwright, no la app; cualquier otro motivo sí es un fallo real
+  const real = inst.installabilityErrors.filter((e) => e.errorId !== "in-incognito");
+  assert(real.length === 0, "la PWA no es instalable: " + JSON.stringify(real));
 });
 
 await test("modo 3D en edición y en juego (WebGPU), girando la cámara", async () => {
