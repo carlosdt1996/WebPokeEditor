@@ -194,6 +194,8 @@ export class Game {
     if (res === "win") {
       this.defeated.add(this.key(n));
       await this.host.dialog(n.name, n.defeatedLines?.length ? n.defeatedLines : ["Me has vencido."]);
+      const r = n.winScript ? parseScript(n.winScript) : null;
+      if (r?.ok) { this.refreshBuiltins(); try { await runScript(r.code, this.scriptCtx(n), this.e); } catch (err) { this.host.say((err as Error).message); } }
     }
   }
 
@@ -207,6 +209,7 @@ export class Game {
   }
 
   private async fight(foes: Mon[], trainer?: string, double?: boolean) {
+    if (!this.party.length) { await this.host.dialog(null, ["Todavía no tienes ninguna criatura que combata por ti."]); return null; }
     if (!this.party.some((m) => m.hp > 0)) healAll(this.p, this.party);
     const b = new Battle(this.p, this.e, this.party, foes, { trainer, double, weather: this.map.weather, inv: this.inv });
     await this.host.battle(b);

@@ -25,6 +25,7 @@ Plugins en WASM (sandbox) o JS limitado para añadir comandos. Ver ADR-0005 (pen
 - **Funciones y estructuras**: `def nombre … end` + `call nombre` + `return` (pila de 16 llamadas en la VM), `choice A | B | C` (menú; el índice elegido queda en la variable `choice`) y `setstr nombre texto` (variables de texto; `{nombre}` se sustituye por el texto o, si no existe, por la variable numérica).
 - **Listas y texto** (JS, vía `VM_HOST`): `list`, `push`, `pop`, `clear`, `len`, `get`, `pick` (azar reproducible), `upper`, `lower`, `strlen`, `streq`, `contains`; las listas guardan texto y los resultados numéricos van a variables de la VM. `equip <objeto>` equipa un objeto del inventario. Las operaciones puras no interrumpen un cuadro de diálogo: los `say` contiguos siguen agrupados.
 - **Al entrar al mapa** (`GameMap.onEnter`): se ejecuta al llegar por un salto, al empezar la partida y al volver tras perder; la profundidad de ejecuciones encadenadas está acotada (5).
+- **Al ganar a un entrenador** (`Npc.winScript`): se ejecuta tras la victoria (medallas, dinero, objetos).
 - **Disparadores por casilla** (`GameMap.triggers`): ejecutan un script al pisar la casilla (opcionalmente solo la primera vez). Variables predefinidas al empezar cada script: `steps`, `party`, `level`.
 - Al salir del mapa (`GameMap.onExit`) se ejecuta antes del cambio, por un salto o un script `warp`.
 - Pendiente: listas de números, diccionarios, `substr`/`replace`, y compilar scripts a una forma serializable en el proyecto.

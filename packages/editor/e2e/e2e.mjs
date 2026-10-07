@@ -68,6 +68,13 @@ const mapId = "window.__wpe.view.game && window.__wpe.view.game.map.id";
 // Un PNG real de WxH generado en el navegador
 const png = (p, w, h) => W(p, ([w, h]) => { const c = document.createElement("canvas"); c.width = w; c.height = h; const g = c.getContext("2d"); g.fillStyle = "#e91e63"; g.fillRect(0, 0, w, h); g.fillStyle = "#fff"; g.fillRect(w / 4, h / 4, w / 2, h / 2); return c.toDataURL("image/png").split(",")[1]; }, [w, h]);
 
+/** Crea un proyecto nuevo con la plantilla del mini mundo de ejemplo. */
+async function newExample(p) {
+  await p.click("header button:has-text('Nuevo')");
+  await p.click(".tpl:has-text('Mini mundo')");
+  await p.waitForTimeout(500);
+}
+
 console.log("E2E WebPokeEditor");
 let page = await newPage();
 
@@ -116,8 +123,7 @@ await test("redimensionar mapa conserva contenido y recorta NPC fuera", async ()
   eq(await W(page, () => window.__wpe.project.maps[2].w), 10, "persistencia tras recargar");
 });
 page.on("dialog", (d) => d.accept());
-await page.click("button:has-text('Nuevo')");
-await page.waitForTimeout(400);
+await newExample(page);
 
 await test("crear NPC, editar en el inspector y pasar a script con validación", async () => {
   await page.click("button:has-text('🧑 NPC')");
@@ -623,8 +629,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   await dl.saveAs(path);
   const json = JSON.parse(readFileSync(path, "utf8"));
   eq([json.name, json.schemaVersion, json.maps.length, json.items.length], ["Proyecto E2E", 5, 3, 9], "contenido exportado");
-  await page.click("button:has-text('Nuevo')");
-  await page.waitForTimeout(400);
+  await newExample(page);
   eq(await W(page, () => window.__wpe.project.name), "Mi Fangame", "tras Nuevo");
   await page.locator("header input[type=file]").setInputFiles(path);
   await page.waitForFunction(() => window.__wpe.project.name === "Proyecto E2E");
@@ -641,7 +646,7 @@ await test("exportar e importar el proyecto (.wpe.json) sin pérdidas", async ()
   await page.waitForTimeout(400);
   assert(msg.includes("fantasma"), "debe explicar el error: " + msg);
   eq(await W(page, () => window.__wpe.project.name), "Antiguo", "proyecto intacto");
-  await page.click("button:has-text('Nuevo')");
+  await newExample(page);
 });
 
 await test("exportar juego a un único .html y jugarlo", async () => {
@@ -662,6 +667,68 @@ await test("exportar juego a un único .html y jugarlo", async () => {
   await g.click("text=🧊 3D"); await g.waitForSelector("canvas.gl3d", { state: "visible" }); await g.waitForTimeout(400);
   await shot(g, "06-juego-exportado-3d");
   await g.context().close();
+});
+
+await test("región «Archipiélago de la Marea»: plantilla, compañero inicial, puerta, líder de gimnasio y medalla", async () => {
+  if (await page.locator("text=■ Detener").count()) await page.click("text=■ Detener");
+  await page.click("header button:has-text('Nuevo')");
+  await page.click(".tpl:has-text('Archipiélago')");
+  await page.waitForFunction(() => window.__wpe.project.name === "Archipiélago de la Marea", null, { timeout: 8000 });
+  eq(await W(page, () => window.__wpe.project.maps.length), 21, "mapas de la plantilla");
+  await page.click("text=▶ Probar");
+  await page.waitForTimeout(300);
+  eq(await W(page, () => window.__wpe.view.game.map.id), "brisa", "empieza en Pueblo Brisa");
+  // la salida del pueblo está cerrada sin compañero
+  await W(page, () => { void window.__wpe.view.game.warpTo("brisa", 19, 9); });
+  await page.waitForTimeout(250);
+  await page.keyboard.down("ArrowRight");
+  await page.waitForSelector(".dialog:not([hidden])", { timeout: 8000 });
+  await page.keyboard.up("ArrowRight");
+  assert((await page.textContent(".dialog")).includes("compañero"), "aviso del guardia: " + (await page.textContent(".dialog")));
+  await closeDialog(page);
+  await page.waitForFunction(() => window.__wpe.engine.cell.x === 18 && !window.__wpe.view.game.busy, null, { timeout: 8000 });
+  // laboratorio: elegir el primer compañero (Brasito = primera opción)
+  await W(page, () => { void window.__wpe.view.game.warpTo("lab", 6, 7); });
+  await page.waitForTimeout(250);
+  await holdUntil(page, "ArrowUp", cell(6, 3));
+  await key(page, "Enter", 80);
+  for (let i = 0; i < 30 && (await W(page, () => window.__wpe.view.game.busy)); i++) {
+    if (await page.locator(".choice").count()) { await key(page, "Enter", 80); await page.waitForTimeout(150); continue; }
+    if (await page.locator(".dialog:not([hidden])").count()) await key(page, "Enter", 80);
+    await page.waitForTimeout(150);
+  }
+  eq(await W(page, () => window.__wpe.view.game.party.map((m) => m.species)), ["brasito"], "compañero inicial");
+  eq(await W(page, () => [window.__wpe.engine.hasFlag("starter"), window.__wpe.view.game.inv.ball]), [true, 5], "marca y objetos del profesor");
+  // gimnasio de Villa Coral: ganar a la líder da la medalla
+  await W(page, () => { const g = window.__wpe.view.game; g.party[0].level = 40; g.party[0].hp = 999; void g.warpTo("gym-coral", 7, 4); });
+  await page.waitForTimeout(300);
+  await holdUntil(page, "ArrowUp", cell(7, 3));
+  await key(page, "Enter", 80);
+  await page.waitForSelector(".dialog:not([hidden])");
+  await closeDialog(page);
+  await page.waitForSelector(".battle", { timeout: 8000 });
+  for (let i = 0; i < 80 && (await page.locator(".battle").count()); i++) {
+    const fight = page.locator(".menu button:has-text('Luchar')");
+    if (await fight.count()) { await fight.click(); await page.locator(".menu button").first().click(); }
+    await page.waitForTimeout(150);
+    await page.locator(".battle").click({ position: { x: 20, y: 20 } }).catch(() => {});
+  }
+  assert(!(await page.locator(".battle").count()), "el combate contra la líder no terminó");
+  for (let i = 0; i < 20 && (await W(page, () => window.__wpe.view.game.busy)); i++) { if (await page.locator(".dialog:not([hidden])").count()) await key(page, "Enter", 80); await page.waitForTimeout(150); }
+  eq(await W(page, () => [window.__wpe.engine.hasFlag("medalla1"), window.__wpe.engine.getVar("medallas")]), [true, 1], "medalla de Fresia");
+  // con la medalla, la puerta de Villa Coral deja pasar a la Ruta 2
+  await W(page, () => { void window.__wpe.view.game.warpTo("coral", 23, 8); });
+  await page.waitForTimeout(250);
+  await holdUntil(page, "ArrowRight", `(${mapId}) === "ruta2"`, 12000);
+  eq(await W(page, () => window.__wpe.view.game.map.id), "ruta2", "se puede viajar a la Ruta 2");
+  // vista 3D de la ciudad volcánica (alturas, ceniza)
+  await W(page, () => { void window.__wpe.view.game.warpTo("ceniza", 13, 10); });
+  await page.click("text=🧊 3D");
+  await page.waitForSelector("canvas.gl3d", { state: "visible" });
+  await page.waitForTimeout(1200);
+  await shot(page, "10-ceniza-3d");
+  await page.click("text=🧊 3D");
+  await page.click("text=■ Detener");
 });
 
 await test("sin errores de consola durante toda la sesión", async () => {

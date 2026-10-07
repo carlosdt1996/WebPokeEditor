@@ -92,6 +92,8 @@ export interface Npc {
   double?: boolean;
   /** Solo kind "script": ver script.ts. */
   script?: string;
+  /** Solo entrenadores: script que se ejecuta al ganarles (p. ej. dar una medalla). */
+  winScript?: string;
 }
 /** Efecto de un objeto equipable: refuerzo de tipo (+amount %), restos (1/16 por turno), baya de curación (amount % al bajar a la mitad), baya de estado y banda (sobrevive con 1 PS). */
 export interface HoldEffect { kind: "boost" | "leftovers" | "berry" | "cureBerry" | "focus"; type?: number; amount?: number }
@@ -152,9 +154,9 @@ export function decodeTiles(b64: string, n: number): Uint8Array {
   return out;
 }
 
-const st = (hp: number, atk: number, def: number, spa: number, spd: number, spe: number): Stats => ({ hp, atk, def, spa, spd, spe });
+export const st = (hp: number, atk: number, def: number, spa: number, spd: number, spe: number): Stats => ({ hp, atk, def, spa, spd, spe });
 
-class Grid {
+export class Grid {
   t: Uint8Array;
   o: Uint8Array;
   hg: Int8Array;
@@ -399,6 +401,7 @@ export function validate(p: Project): string[] {
       if (n.x >= m.w || n.y >= m.h) errs.push(`${m.name}: NPC "${n.name}" fuera del mapa`);
       for (const t of n.team ?? []) { if (!speciesIds.has(t.species)) errs.push(`${m.name}: "${n.name}" usa especie inexistente "${t.species}"`); checkHeld(`${m.name}: "${n.name}"`, t.held); }
       if (n.kind === "script") checkScript(n.script ?? "", `${m.name}: script de "${n.name}"`);
+      if (n.kind === "trainer" && n.winScript) checkScript(n.winScript, `${m.name}: script al ganar a "${n.name}"`);
       if (n.kind === "trainer" && !(n.team?.length)) errs.push(`${m.name}: el entrenador "${n.name}" no tiene equipo`);
       if (n.kind === "trainer" && n.double && (n.team?.length ?? 0) < 2) errs.push(`${m.name}: el entrenador "${n.name}" necesita 2+ criaturas para un combate doble`);
     }

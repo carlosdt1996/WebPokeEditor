@@ -8,6 +8,7 @@ import { WEATHER_KINDS, WEATHER_NAMES, type WeatherKind, type Npc, type Project,
 import { loadProject as loadStored, saveProject } from "./storage";
 import { ATLAS_COLS, ATLAS_ROWS, ERASE_OBJECT, TILE, TILE_DEFS, atlasFromDataUrl, atlasIndex, createAtlas } from "./tiles";
 import { exportGameHtml, runPlayer } from "./player";
+import { TEMPLATES } from "./templates";
 import { battlePanel } from "./ui/battlePanel";
 import { dataPanel } from "./ui/dataPanel";
 
@@ -175,7 +176,8 @@ async function main() {
             h("select", { title: "Objeto equipado", onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) t.held = v; else delete t.held; persist(); } }, h("option", { value: "" }, "sin objeto"), ...project.items.filter((x) => x.kind === "held").map((x) => h("option", { value: x.id, selected: t.held === x.id }, x.name))),
             h("button", { class: "danger", onclick: () => { team.splice(i, 1); persist(); renderInspector(s); } }, "✕"))),
           h("button", { disabled: team.length >= 6, onclick: () => { team.push({ species: project.species[0]?.id ?? "", level: 5 }); persist(); renderInspector(s); } }, "+ Criatura"),
-          field("Tras perder", lines(n.defeatedLines, (a) => (n.defeatedLines = a))));
+          field("Tras perder", lines(n.defeatedLines, (a) => (n.defeatedLines = a))),
+          h("h3", {}, "Al ganar (script)"), ...scriptEditor(() => n.winScript ?? "", (v) => { n.winScript = v.trim() ? v : undefined; }));
       }
     } else if (s.kind === "trigger") {
       const t = view.map.triggers?.[s.index];
@@ -299,12 +301,24 @@ async function main() {
     } catch (e) { alert((e as Error).message); }
   };
 
+  /** Diálogo para crear un proyecto nuevo a partir de una plantilla. */
+  const newProject = () => {
+    const dlg = h("dialog", { class: "modal" },
+      h("h3", {}, "Nuevo proyecto"),
+      h("p", { class: "hint" }, "Se sustituye el proyecto actual: exporta antes lo que quieras conservar."),
+      ...TEMPLATES.map((t) => h("button", { class: "tpl", onclick: async () => { dlg.close(); await loadProject(t.build()); say(`Proyecto «${t.name}» creado.`); } }, h("b", {}, t.name), h("small", {}, t.description))),
+      h("button", { onclick: () => dlg.close() }, "Cancelar"));
+    dlg.addEventListener("close", () => dlg.remove());
+    document.body.append(dlg);
+    dlg.showModal();
+  };
+
   const top = h("header", { class: "top" },
     h("div", { class: "brand" }, "◓ WebPokeEditor"), nameIn,
     h("div", { class: "grow" }), status,
     h("button", { onclick: () => fileIn.click() }, "Importar"), h("button", { onclick: exportJson, title: "Guarda el proyecto (.wpe.json) para seguir editándolo" }, "Exportar proyecto"),
     h("button", { onclick: exportGame, title: "Genera un único .html jugable con tu juego" }, "📦 Exportar juego"),
-    h("button", { onclick: async () => { if (confirm("¿Crear un proyecto nuevo? Se perderán los cambios no exportados.")) await loadProject(defaultProject()); } }, "Nuevo"),
+    h("button", { onclick: () => newProject() }, "Nuevo"),
     muteBtn, btn3d, playBtn, fileIn,
   );
   const footer = h("footer", {}, h("span", {}, "Motor: Rust → WASM · Render: "), h("b", {}, "…"), h("span", {}, " · Sin afiliación con Nintendo/Game Freak/The Pokémon Company. Criaturas y arte originales; importa tus propios gráficos en Datos."));

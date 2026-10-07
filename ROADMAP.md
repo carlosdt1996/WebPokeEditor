@@ -43,3 +43,8 @@ Leyenda: `[x]` hecho · `[~]` parcial (MVP) · `[ ]` pendiente
 - [x] Audio sintetizado (SFX + música)
 - [ ] Rendimiento, accesibilidad, i18n
 - [ ] Documentación de usuario y tutoriales
+
+## Contenido
+- [x] Plantilla «Archipiélago de la Marea»: 21 mapas, 4 gimnasios, Liga y progresión por medallas
+- [ ] Más regiones/plantillas originales (cuatro gimnasios más, bosque, desierto, ciudad grande)
+- [ ] Sistema de dinero en el motor (hoy es una variable de script) y objetos clave
