@@ -294,7 +294,8 @@ await test("alturas: elevar/bajar casillas y verlas en 3D", async () => {
   await page.click("button:has-text('🕳 Bajar')");
   await page.mouse.click(pos.x, pos.y);
   eq(await h(), 1, "bajar");
-  await page.keyboard.press("Control+z"); await page.keyboard.press("Control+z");
+  // tres trazos (dos subidas y una bajada) → tres deshacer
+  for (let i = 0; i < 3; i++) await page.keyboard.press("Control+z");
   eq(await h(), 0, "deshacer alturas");
   await page.click("button:has-text('✏️ Pintar')");
   await page.click("text=🧊 3D"); await page.waitForTimeout(600);
