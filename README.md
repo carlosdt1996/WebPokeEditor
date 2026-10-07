@@ -7,12 +7,16 @@ Creador de **fangames de Pokémon** que corre íntegramente en el navegador, usa
 > Estado: MVP funcional. Ver [`ROADMAP.md`](ROADMAP.md).
 
 ## Qué hay ya
-- **Editor de mapas** (pintar, rellenar, cuentagotas, punto de inicio, deshacer/rehacer, zoom/pan, redimensionar).
-- **Render WebGPU** (tilemap instanciado + sprites) con **fallback Canvas 2D**.
-- **Núcleo Rust → WASM** determinista: movimiento en grid, colisiones, encuentros en hierba alta, fórmula de daño.
-- **Modo Probar**: camina por tu mapa y encuentra criaturas salvajes.
-- **Editor de datos** (especies, movimientos, encuentros) y **calculadora de combate** (corre en WASM).
-- Guardado local automático + **importar/exportar** proyecto (`.wpe.json`).
+- **Editor de mapas** con varios mapas por proyecto: pintar, rellenar, cuentagotas, deshacer/rehacer, zoom/pan, redimensionar, capa de colisiones.
+- **NPCs** (conversación, entrenadores con equipo propio, curanderos) y **saltos entre mapas** (puertas, rutas) con inspector.
+- **Modo Probar**: caminas por el mundo, hablas con NPCs, te ven los entrenadores, hay encuentros en hierba alta y combates por turnos jugables (movimientos, tipos, STAB, críticos, objetos, cambio, huida, captura, experiencia y subida de nivel).
+- **Modo 3D** (🧊, estilo DS "Diamante/Perla"): terreno con alturas, edificios, árboles y personajes como billboards, cámara inclinada que sigue al jugador y se puede girar (Q/E) y orbitar con el ratón. Requiere WebGPU.
+- **Render WebGPU** (2D instanciado + 3D con depth buffer) con **fallback Canvas 2D** para el modo 2D.
+- **Núcleo Rust → WASM** determinista: movimiento en grid, colisiones, bloqueadores, encuentros, RNG y fórmula de daño.
+- **Editor de datos**: especies, movimientos, equipo inicial, encuentros por mapa, inventario.
+- **Gráficos**: criaturas y arte originales generados por código. Puedes **importar tus propios sprites y tileset** (se quedan en tu navegador/proyecto; ver [aspectos legales](docs/guides/legal-and-assets.md)).
+- Audio sintetizado (SFX y música) con WebAudio.
+- Guardado local automático + **importar/exportar** proyecto (`.wpe.json`, esquema versionado con migraciones).
 
 ## Empezar
 ```bash

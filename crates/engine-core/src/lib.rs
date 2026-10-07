@@ -17,6 +17,10 @@ pub const T_TREE: u8 = 4;
 pub const T_WALL: u8 = 5;
 pub const T_FLOWER: u8 = 6;
 pub const T_SAND: u8 = 7;
+pub const T_DOOR: u8 = 8;
+pub const T_FLOOR: u8 = 9;
+pub const T_CARPET: u8 = 10;
+pub const T_COUNTER: u8 = 11;
 
 pub const IN_UP: u32 = 1;
 pub const IN_DOWN: u32 = 2;
@@ -35,6 +39,8 @@ pub struct State {
     w: usize,
     h: usize,
     tiles: [u8; MAX_DIM * MAX_DIM],
+    /// Celdas ocupadas por entidades (NPCs); el host las mantiene.
+    blockers: [u8; MAX_DIM * MAX_DIM],
     x: i32,
     y: i32,
     prev_x: i32,
@@ -51,6 +57,7 @@ impl State {
             w: 20,
             h: 15,
             tiles: [0; MAX_DIM * MAX_DIM],
+            blockers: [0; MAX_DIM * MAX_DIM],
             x: 0,
             y: 0,
             prev_x: 0,
@@ -66,6 +73,7 @@ impl State {
         self.w = w.clamp(1, MAX_DIM);
         self.h = h.clamp(1, MAX_DIM);
         self.tiles = [0; MAX_DIM * MAX_DIM];
+        self.blockers = [0; MAX_DIM * MAX_DIM];
         self.rng = seed ^ 0x9E37_79B9_7F4A_7C15;
         if self.rng == 0 {
             self.rng = 1;
@@ -94,6 +102,20 @@ impl State {
         if x >= 0 && y >= 0 && (x as usize) < self.w && (y as usize) < self.h {
             self.tiles[y as usize * self.w + x as usize] = t;
         }
+    }
+
+    pub fn set_blocker(&mut self, x: i32, y: i32, v: u8) {
+        if x >= 0 && y >= 0 && (x as usize) < self.w && (y as usize) < self.h {
+            self.blockers[y as usize * self.w + x as usize] = v;
+        }
+    }
+
+    /// ¿Se puede pisar la celda? (dentro del mapa, tile no sólido y sin entidad)
+    pub fn walkable(&self, x: i32, y: i32) -> bool {
+        if x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 {
+            return false;
+        }
+        !is_solid(self.tiles[y as usize * self.w + x as usize]) && self.blockers[y as usize * self.w + x as usize] == 0
     }
 
     /// xorshift64*: determinista y suficiente para el gameplay.
@@ -133,7 +155,7 @@ impl State {
         };
         self.dir = dir;
         let (nx, ny) = (self.x + dx, self.y + dy);
-        if is_solid(self.tile(nx, ny)) {
+        if !self.walkable(nx, ny) {
             return EV_BLOCKED;
         }
         self.prev_x = self.x;
@@ -161,7 +183,7 @@ impl Default for State {
 }
 
 pub fn is_solid(t: u8) -> bool {
-    matches!(t, T_WATER | T_TREE | T_WALL)
+    matches!(t, T_WATER | T_TREE | T_WALL | T_COUNTER)
 }
 
 /// Daño Gen 3-like. `mult_x100` combina STAB y efectividad (100 = neutro);
@@ -251,6 +273,27 @@ pub extern "C" fn engine_rand(max: u32) -> u32 {
     (st().next_rand() % max as u64) as u32
 }
 #[no_mangle]
+pub extern "C" fn engine_clear_blockers() {
+    st().blockers = [0; MAX_DIM * MAX_DIM];
+}
+#[no_mangle]
+pub extern "C" fn engine_set_blocker(x: i32, y: i32, v: u32) {
+    st().set_blocker(x, y, v as u8);
+}
+#[no_mangle]
+pub extern "C" fn engine_walkable(x: i32, y: i32) -> u32 {
+    st().walkable(x, y) as u32
+}
+/// Celda lógica del jugador (destino si está moviéndose).
+#[no_mangle]
+pub extern "C" fn engine_cell_x() -> i32 {
+    st().x
+}
+#[no_mangle]
+pub extern "C" fn engine_cell_y() -> i32 {
+    st().y
+}
+#[no_mangle]
 pub extern "C" fn engine_is_solid(t: u32) -> u32 {
     is_solid(t as u8) as u32
 }
@@ -299,6 +342,26 @@ mod tests {
         // bordes del mapa
         s.set_spawn(0, 0);
         assert_eq!(s.tick(IN_LEFT), EV_BLOCKED);
+    }
+
+    #[test]
+    fn blockers_block_and_new_tiles() {
+        let mut s = State::new();
+        s.reset(5, 5, 1);
+        s.set_spawn(1, 1);
+        s.set_blocker(2, 1, 1);
+        assert_eq!(s.tick(IN_RIGHT), EV_BLOCKED);
+        assert!(!s.walkable(2, 1) && s.walkable(1, 2) && !s.walkable(-1, 0));
+        s.set_blocker(2, 1, 0);
+        assert!(s.walkable(2, 1));
+        s.set_tile(3, 3, T_COUNTER);
+        assert!(!s.walkable(3, 3));
+        s.set_tile(3, 3, T_DOOR);
+        assert!(s.walkable(3, 3));
+        s.reset(5, 5, 1);
+        s.set_blocker(2, 1, 1);
+        s.reset(5, 5, 1);
+        assert!(s.walkable(2, 1));
     }
 
     #[test]

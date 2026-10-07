@@ -1,26 +1,52 @@
 /** Modelo de datos del proyecto (ver docs/architecture/data-model.md). Todo es dato serializable. */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface Stats { hp: number; atk: number; def: number; spa: number; spd: number; spe: number }
 export const STAT_KEYS: (keyof Stats)[] = ["hp", "atk", "def", "spa", "spd", "spe"];
 
-export interface Species { id: string; name: string; types: number[]; stats: Stats; moves: string[] }
+export interface Species {
+  id: string; name: string; types: number[]; stats: Stats; moves: string[];
+  /** Data URL PNG importado por el usuario (opcional). Nunca se incluye en el repo. */
+  sprite?: string;
+}
 export interface Move { id: string; name: string; type: number; category: "physical" | "special"; power: number; accuracy: number }
+
+export type NpcKind = "talk" | "trainer" | "healer";
+export interface TeamMember { species: string; level: number }
+export interface Npc {
+  id: string; x: number; y: number; look: number; dir: number; kind: NpcKind; name: string;
+  lines: string[];
+  /** Solo entrenadores. */
+  team?: TeamMember[];
+  defeatedLines?: string[];
+}
+export interface Warp { x: number; y: number; toMap: string; toX: number; toY: number }
+
+export interface GameMap {
+  id: string; name: string; w: number; h: number; tiles: string;
+  npcs: Npc[]; warps: Warp[];
+  /** Ids de especies que aparecen en hierba alta de este mapa. */
+  encounters: string[];
+  encounterLevel: [number, number];
+}
 
 export interface Project {
   schemaVersion: number;
   name: string;
   seed: number;
-  map: { w: number; h: number; tiles: string; spawn: { x: number; y: number } };
+  maps: GameMap[];
+  start: { map: string; x: number; y: number };
+  party: TeamMember[];
+  inventory: { ball: number; potion: number };
   /** Nombres de tipo; el índice es el id de tipo. */
   types: string[];
   /** typeChart[atacante][defensor] = multiplicador (0, 0.5, 1, 2). */
   typeChart: number[][];
   species: Species[];
   moves: Move[];
-  /** Ids de especies que aparecen en hierba alta. */
-  encounters: string[];
+  /** Atlas de gráficos propio (PNG 128×64 en data URL), opcional. */
+  atlas?: string;
 }
 
 export function encodeTiles(t: Uint8Array): string {
@@ -37,28 +63,86 @@ export function decodeTiles(b64: string, n: number): Uint8Array {
 
 const st = (hp: number, atk: number, def: number, spa: number, spd: number, spe: number): Stats => ({ hp, atk, def, spa, spd, spe });
 
-/** Criaturas y movimientos originales de demostración. */
+class Grid {
+  t: Uint8Array;
+  constructor(public w: number, public h: number, fillTile = 0) { this.t = new Uint8Array(w * h).fill(fillTile); }
+  set(x: number, y: number, v: number) { if (x >= 0 && y >= 0 && x < this.w && y < this.h) this.t[y * this.w + x] = v; }
+  rect(x0: number, y0: number, x1: number, y1: number, v: number) { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) this.set(x, y, v); }
+  border(v: number) { this.rect(0, 0, this.w - 1, 0, v); this.rect(0, this.h - 1, this.w - 1, this.h - 1, v); this.rect(0, 0, 0, this.h - 1, v); this.rect(this.w - 1, 0, this.w - 1, this.h - 1, v); }
+}
+
+/** Mundo de demostración con criaturas, movimientos y personajes originales. */
 export function defaultProject(): Project {
-  const w = 24, h = 18;
-  const tiles = new Uint8Array(w * h); // hierba
-  const set = (x: number, y: number, t: number) => { if (x >= 0 && y >= 0 && x < w && y < h) tiles[y * w + x] = t; };
-  for (let x = 0; x < w; x++) { set(x, 0, 4); set(x, h - 1, 4); }
-  for (let y = 0; y < h; y++) { set(0, y, 4); set(w - 1, y, 4); }
-  for (let y = 1; y < h - 1; y++) set(11, y, 2); // camino vertical
-  for (let x = 1; x < w - 1; x++) set(x, 9, 2); // camino horizontal
-  for (let y = 11; y < 16; y++) for (let x = 2; x < 9; x++) set(x, y, 1); // hierba alta
-  for (let y = 2; y < 6; y++) for (let x = 15; x < 21; x++) set(x, y, 3); // lago
-  for (let x = 14; x < 22; x++) { set(x, 6, 7); }
-  for (let y = 2; y < 5; y++) for (let x = 3; x < 8; x++) set(x, y, y === 2 ? 5 : 5); // casa
-  set(5, 4, 2); set(5, 5, 2); set(5, 6, 2); set(5, 7, 2); set(5, 8, 2);
-  for (const [x, y] of [[9, 3], [9, 6], [13, 12], [14, 14], [20, 14]]) set(x, y, 4);
-  for (const [x, y] of [[13, 3], [18, 11], [19, 12], [16, 15], [3, 7], [7, 7]]) set(x, y, 6);
+  // --- Pueblo Inicial ---
+  const town = new Grid(24, 18);
+  town.border(4);
+  town.rect(11, 1, 11, 16, 2); town.rect(1, 9, 22, 9, 2);
+  town.rect(2, 11, 8, 15, 1);
+  town.rect(15, 2, 20, 5, 3); town.rect(14, 6, 21, 6, 7);
+  town.rect(3, 2, 7, 4, 5); town.set(5, 4, 8);
+  town.rect(5, 5, 5, 8, 2);
+  for (const [x, y] of [[9, 3], [9, 6], [13, 12], [14, 14], [20, 14]]) town.set(x, y, 4);
+  for (const [x, y] of [[13, 3], [18, 11], [19, 12], [16, 15], [3, 7], [7, 7]]) town.set(x, y, 6);
+  town.set(23, 9, 2);
+
+  // --- Casa (interior) ---
+  const home = new Grid(10, 8, 9);
+  home.border(5);
+  home.rect(4, 5, 6, 6, 10);
+  home.rect(6, 3, 6, 3, 11); home.rect(8, 3, 8, 3, 11);
+  home.set(5, 7, 8);
+
+  // --- Ruta 1 ---
+  const route = new Grid(22, 16);
+  route.border(4);
+  route.rect(1, 8, 20, 8, 2);
+  route.rect(3, 2, 8, 6, 1); route.rect(12, 10, 19, 14, 1); route.rect(13, 2, 17, 4, 1);
+  route.rect(10, 11, 11, 13, 3);
+  for (const [x, y] of [[2, 10], [4, 12], [9, 4], [10, 2], [11, 6]]) route.set(x, y, 4);
+  for (const [x, y] of [[1, 6], [20, 6], [8, 10]]) route.set(x, y, 6);
+  route.set(0, 8, 2);
+
+  const mapOf = (id: string, name: string, g: Grid, extra: Partial<GameMap>): GameMap => ({
+    id, name, w: g.w, h: g.h, tiles: encodeTiles(g.t), npcs: [], warps: [], encounters: [], encounterLevel: [3, 6], ...extra,
+  });
 
   return {
     schemaVersion: SCHEMA_VERSION,
     name: "Mi Fangame",
     seed: 12345,
-    map: { w, h, tiles: encodeTiles(tiles), spawn: { x: 11, y: 8 } },
+    start: { map: "pueblo", x: 11, y: 8 },
+    party: [{ species: "flamito", level: 5 }],
+    inventory: { ball: 8, potion: 4 },
+    maps: [
+      mapOf("pueblo", "Pueblo Inicial", town, {
+        warps: [
+          { x: 5, y: 4, toMap: "casa", toX: 5, toY: 6 },
+          { x: 23, y: 9, toMap: "ruta1", toX: 1, toY: 8 },
+        ],
+        npcs: [
+          { id: "aldeano", x: 13, y: 9, look: 1, dir: 2, kind: "talk", name: "Aldeano", lines: ["¡Bienvenido a tu aventura!", "Al este está la Ruta 1. Cuidado con la hierba alta."] },
+          { id: "pescador", x: 14, y: 7, look: 3, dir: 0, kind: "talk", name: "Pescador", lines: ["El lago está tranquilo hoy...", "A veces pican criaturas muy raras."] },
+        ],
+        encounters: ["pelusin"],
+        encounterLevel: [2, 4],
+      }),
+      mapOf("casa", "Tu casa", home, {
+        warps: [{ x: 5, y: 7, toMap: "pueblo", toX: 5, toY: 5 }],
+        npcs: [
+          { id: "mama", x: 3, y: 3, look: 0, dir: 0, kind: "talk", name: "Mamá", lines: ["¡Buenos días, cariño!", "Tu equipo ya está listo. ¡Ten cuidado ahí fuera!"] },
+          { id: "enfermera", x: 7, y: 3, look: 2, dir: 0, kind: "healer", name: "Enfermera", lines: ["Déjame cuidar de tus criaturas...", "¡Listo! Están como nuevas."] },
+        ],
+      }),
+      mapOf("ruta1", "Ruta 1", route, {
+        warps: [{ x: 0, y: 8, toMap: "pueblo", toX: 22, toY: 9 }],
+        npcs: [
+          { id: "joven", x: 14, y: 6, look: 1, dir: 0, kind: "trainer", name: "Joven Marcos", lines: ["¡Oye! ¡Nuestras miradas se cruzaron, a combatir!"], team: [{ species: "pelusin", level: 4 }, { species: "hojin", level: 5 }], defeatedLines: ["Vaya... eres más fuerte de lo que parece."] },
+          { id: "campista", x: 6, y: 10, look: 3, dir: 3, kind: "trainer", name: "Campista Ana", lines: ["¡En el campo se aprende rápido!"], team: [{ species: "aquin", level: 6 }], defeatedLines: ["¡Bien jugado!"] },
+        ],
+        encounters: ["pelusin", "pelusin", "hojin", "flamito", "aquin"],
+        encounterLevel: [3, 6],
+      }),
+    ],
     types: ["Normal", "Fuego", "Agua", "Planta"],
     typeChart: [
       [1, 1, 1, 1],
@@ -78,50 +162,94 @@ export function defaultProject(): Project {
       { id: "hojaje", name: "Hojaje", type: 3, category: "physical", power: 55, accuracy: 95 },
       { id: "chorro", name: "Chorro", type: 2, category: "special", power: 40, accuracy: 100 },
     ],
-    encounters: ["pelusin", "pelusin", "hojin", "flamito", "aquin"],
   };
+}
+
+/** Migra proyectos de versiones anteriores al esquema actual (puro; no muta la entrada). */
+export function migrate(input: unknown): Project {
+  const p = structuredClone(input) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (p.schemaVersion === 1) {
+    const m = p.map;
+    p.maps = [{
+      id: "mapa1", name: "Mapa 1", w: m.w, h: m.h, tiles: m.tiles, npcs: [], warps: [],
+      encounters: p.encounters ?? [], encounterLevel: [3, 6],
+    }];
+    p.start = { map: "mapa1", x: m.spawn.x, y: m.spawn.y };
+    p.party = p.species?.[0] ? [{ species: p.species[0].id, level: 5 }] : [];
+    p.inventory = { ball: 5, potion: 3 };
+    delete p.map; delete p.encounters;
+    p.schemaVersion = 2;
+  }
+  return p as Project;
 }
 
 /** Valida y reporta problemas (referencias rotas, tamaños). Devuelve lista vacía si todo está bien. */
 export function validate(p: Project): string[] {
   const errs: string[] = [];
   if (p.schemaVersion !== SCHEMA_VERSION) errs.push(`schemaVersion ${p.schemaVersion} no soportado`);
-  const { w, h } = p.map;
-  if (!(w >= 1 && w <= 128 && h >= 1 && h <= 128)) errs.push("Tamaño de mapa fuera de rango (1–128)");
-  if (p.map.spawn.x >= w || p.map.spawn.y >= h) errs.push("El punto de inicio está fuera del mapa");
   const speciesIds = new Set(p.species.map((s) => s.id));
   const moveIds = new Set(p.moves.map((m) => m.id));
+  const mapIds = new Set(p.maps.map((m) => m.id));
+  if (!p.maps.length) errs.push("El proyecto no tiene mapas");
+  if (mapIds.size !== p.maps.length) errs.push("Ids de mapa duplicados");
   if (speciesIds.size !== p.species.length) errs.push("Ids de especie duplicados");
   if (moveIds.size !== p.moves.length) errs.push("Ids de movimiento duplicados");
+  const start = p.maps.find((m) => m.id === p.start.map);
+  if (!start) errs.push(`El mapa inicial "${p.start.map}" no existe`);
+  else if (p.start.x >= start.w || p.start.y >= start.h) errs.push("El punto de inicio está fuera del mapa");
+  for (const t of p.party) if (!speciesIds.has(t.species)) errs.push(`Equipo inicial: especie inexistente "${t.species}"`);
+  for (const m of p.maps) {
+    if (!(m.w >= 1 && m.w <= 128 && m.h >= 1 && m.h <= 128)) errs.push(`${m.name}: tamaño fuera de rango (1–128)`);
+    for (const e of m.encounters) if (!speciesIds.has(e)) errs.push(`${m.name}: encuentro con especie inexistente "${e}"`);
+    for (const n of m.npcs) {
+      if (n.x >= m.w || n.y >= m.h) errs.push(`${m.name}: NPC "${n.name}" fuera del mapa`);
+      for (const t of n.team ?? []) if (!speciesIds.has(t.species)) errs.push(`${m.name}: "${n.name}" usa especie inexistente "${t.species}"`);
+      if (n.kind === "trainer" && !(n.team?.length)) errs.push(`${m.name}: el entrenador "${n.name}" no tiene equipo`);
+    }
+    for (const w of m.warps) {
+      const dest = p.maps.find((d) => d.id === w.toMap);
+      if (!dest) errs.push(`${m.name}: salto a mapa inexistente "${w.toMap}"`);
+      else if (w.toX >= dest.w || w.toY >= dest.h) errs.push(`${m.name}: salto fuera del mapa destino "${dest.name}"`);
+    }
+  }
   for (const s of p.species) {
     for (const t of s.types) if (t < 0 || t >= p.types.length) errs.push(`${s.name}: tipo inválido`);
     for (const m of s.moves) if (!moveIds.has(m)) errs.push(`${s.name}: movimiento inexistente "${m}"`);
   }
   for (const m of p.moves) if (m.type < 0 || m.type >= p.types.length) errs.push(`${m.name}: tipo inválido`);
-  for (const e of p.encounters) if (!speciesIds.has(e)) errs.push(`Encuentro con especie inexistente "${e}"`);
   if (p.typeChart.length !== p.types.length || p.typeChart.some((r) => r.length !== p.types.length)) errs.push("typeChart no coincide con los tipos");
   return errs;
 }
 
 export function parseProject(json: string): Project {
-  const p = JSON.parse(json) as Project;
+  const p = migrate(JSON.parse(json));
   const errs = validate(p);
   if (errs.length) throw new Error("Proyecto inválido:\n- " + errs.join("\n- "));
   return p;
 }
 
-/** Multiplicador ×100 de efectividad y STAB. */
 export function effectiveness(p: Project, moveType: number, defTypes: number[]): number {
   return defTypes.reduce((a, t) => a * (p.typeChart[moveType]?.[t] ?? 1), 1);
 }
 export function maxHp(base: number, level: number) { return Math.floor((2 * base * level) / 100) + level + 10; }
 export function statAt(base: number, level: number) { return Math.floor((2 * base * level) / 100) + 5; }
 
-const KEY = "webpokeeditor.project.v1";
-export function saveLocal(p: Project) { try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* cuota/privado */ } }
+export function slug(s: string) {
+  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "x";
+}
+export function uniqueId(existing: string[], base: string) {
+  let id = slug(base), n = 2;
+  while (existing.includes(id)) id = `${slug(base)}-${n++}`;
+  return id;
+}
+
+const KEY = "webpokeeditor.project.v2";
+export function saveLocal(p: Project): boolean {
+  try { localStorage.setItem(KEY, JSON.stringify(p)); return true; } catch { return false; }
+}
 export function loadLocal(): Project | null {
   try {
-    const s = localStorage.getItem(KEY);
+    const s = localStorage.getItem(KEY) ?? localStorage.getItem("webpokeeditor.project.v1");
     return s ? parseProject(s) : null;
   } catch { return null; }
 }

@@ -26,3 +26,6 @@ Capa de abstracción `Renderer` con implementación WebGPU y WebGL2.
 
 ## Depuración
 Capturas de frames de referencia para tests visuales (ver [testing](../guides/testing.md)).
+
+## Modo 3D (`packages/editor/src/renderer3d.ts`)
+Ver [ADR-0005](../adr/0005-3d-mode.md). Un único pipeline (posición, uv, sombreado por cara) con depth buffer `depth24plus`, alpha-test y niebla lineal. Malla estática del mapa + buffer dinámico para billboards de personajes. Cámara: perspectiva 40°, pitch ≈ 0.95 rad, distancia 13 en juego.

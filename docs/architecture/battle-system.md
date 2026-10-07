@@ -21,3 +21,6 @@ Niveles: aleatoria → heurística de daño → reglas por trainer (scripteable)
 
 ## Validación
 Tests contra casos conocidos de cálculo de daño y *replays*.
+
+## Implementación actual
+La lógica de turnos vive en `packages/editor/src/battle.ts` (TypeScript) y usa del núcleo WASM el RNG determinista (`engine.rand`) y la fórmula de daño (`engine.damage`), por lo que es reproducible por semilla y está cubierta por tests. Mover el bucle de turnos a un crate `battle` en Rust sigue en el roadmap.

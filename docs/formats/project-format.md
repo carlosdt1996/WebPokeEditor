@@ -22,7 +22,7 @@ mi-juego/
 ## `project.json` (ejemplo)
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "Mi Fangame",
   "author": "",
   "startMap": "pueblo-inicial",
@@ -33,3 +33,5 @@ mi-juego/
 
 ## Almacenamiento
 Editor: OPFS (carpeta virtual). Import/export como `.wpe`.
+
+> **v2**: los mapas pasan a `maps[]` con NPCs y saltos (ver [data-model](../architecture/data-model.md)); `startMap` se sustituye por `start: { map, x, y }`.

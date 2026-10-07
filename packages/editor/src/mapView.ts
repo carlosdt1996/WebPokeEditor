@@ -1,11 +1,17 @@
+import { sfx, startMusic, stopMusic } from "./audio";
+import type { Battle } from "./battle";
 import { h } from "./dom";
-import { Engine, Ev, Input } from "./engine";
-import { type Project, decodeTiles } from "./project";
+import { Engine, Input } from "./engine";
+import { Game, type Host } from "./game";
+import { type GameMap, type Npc, type Project, decodeTiles, encodeTiles, uniqueId } from "./project";
 import { createRenderer, type Renderer } from "./renderer";
 import { MAX_INSTANCES } from "./renderer/types";
-import { PLAYER_SPRITE, TILE, TILE_DEFS, createAtlas } from "./tiles";
+import { type Cam3D, type Entity3D, Renderer3D } from "./renderer3d";
+import { NPC_SPRITE, PLAYER_SPRITE, TILE, TILE_DEFS } from "./tiles";
+import { runBattleUi } from "./ui/battleUi";
 
-export type Tool = "paint" | "fill" | "pick" | "spawn";
+export type Tool = "paint" | "fill" | "pick" | "spawn" | "npc" | "warp";
+export type Selection = { kind: "npc" | "warp"; index: number } | null;
 
 interface Edit { idx: number; from: number; to: number }
 
@@ -16,16 +22,24 @@ export class MapView {
   showSolid = false;
   showGrid = true;
   playing = false;
+  mode3d = false;
+  selection: Selection = null;
   onEdit: () => void = () => {};
   onPick: (t: number) => void = () => {};
   onMessage: (m: string) => void = () => {};
-  onEncounter: (speciesId: string | null) => void = () => {};
+  onSelect: (s: Selection) => void = () => {};
   rendererKind = "";
+  game: Game | null = null;
 
   private renderer!: Renderer;
   private gl!: HTMLCanvasElement;
+  private gl3d?: HTMLCanvasElement;
+  private r3d?: Renderer3D;
+  private atlas?: HTMLCanvasElement;
+  private world3dDirty = true;
+  private cam3: Cam3D = { x: 0, z: 0, yaw: 0, pitch: 0.95, dist: 9 };
   private overlay = h("canvas", { class: "overlay" });
-  private dialog = h("div", { class: "dialog", hidden: true });
+  private dialogEl = h("div", { class: "dialog", hidden: true });
   private og = this.overlay.getContext("2d")!;
   private cam = { x: 0, y: 0, zoom: 3 };
   private dpr = 1;
@@ -33,27 +47,29 @@ export class MapView {
   private cssH = 1;
   private inst = new Float32Array(MAX_INSTANCES * 4);
   private hover: { x: number; y: number } | null = null;
-  private spawn = { x: 0, y: 0 };
   private undo: Edit[][] = [];
   private redo: Edit[][] = [];
   private stroke: Map<number, Edit> | null = null;
   private pan: { x: number; y: number; cx: number; cy: number } | null = null;
+  private orbit: { x: number; y: number; yaw: number; pitch: number } | null = null;
   private spaceDown = false;
   private keys = new Set<string>();
   private acc = 0;
   private last = 0;
-  private paused = false;
+  private advance: (() => void) | null = null;
   private project!: Project;
+  private editIndex = 0;
+  private curIndex = 0;
 
   constructor(private engine: Engine) {}
 
-  async init(project: Project) {
+  async init(project: Project, atlas: HTMLCanvasElement) {
     const { renderer, canvas } = await createRenderer(this.el);
     this.renderer = renderer;
     this.gl = canvas;
     this.rendererKind = renderer.kind;
-    renderer.setAtlas(createAtlas());
-    this.el.append(this.overlay, this.dialog);
+    this.setAtlas(atlas);
+    this.el.append(this.overlay, this.dialogEl);
     this.setProject(project);
     this.bind();
     new ResizeObserver(() => this.onResize()).observe(this.el);
@@ -62,34 +78,71 @@ export class MapView {
     requestAnimationFrame((t) => this.frame(t));
   }
 
-  /** Carga el mapa de un proyecto en el motor. */
-  setProject(p: Project) {
-    this.project = p;
-    const { w, h: hh, tiles, spawn } = p.map;
-    this.engine.loadMap(w, hh, decodeTiles(tiles, w * hh), p.seed);
-    this.spawn = { ...spawn };
-    this.engine.setSpawn(spawn.x, spawn.y);
-    this.undo = []; this.redo = [];
-    this.stopPlay();
+  get map(): GameMap { return this.project.maps[this.curIndex]; }
+  get mapIndex() { return this.curIndex; }
+
+  setAtlas(atlas: HTMLCanvasElement) {
+    this.atlas = atlas;
+    this.renderer.setAtlas(atlas);
+    this.r3d?.setAtlas(atlas);
   }
 
-  /** Vuelca el mapa del motor al proyecto. */
-  syncTo(p: Project) {
-    p.map.w = this.engine.width;
-    p.map.h = this.engine.height;
-    p.map.spawn = { ...this.spawn };
+  // ----- Proyecto y mapas -----
+  setProject(p: Project) {
+    this.stopPlay();
+    this.project = p;
+    const i = Math.max(0, p.maps.findIndex((m) => m.id === p.start.map));
+    this.switchMap(i, false);
+  }
+
+  /** Carga el mapa `index` en el motor para edición. */
+  switchMap(index: number, commit = true) {
+    if (this.playing) return;
+    if (commit) this.commit();
+    this.curIndex = this.editIndex = index;
+    this.loadIntoEngine(index, false);
+    this.undo = []; this.redo = [];
+    this.select(null);
+    this.fit();
+  }
+
+  private loadIntoEngine(index: number, runtime: boolean, x?: number, y?: number) {
+    const m = this.project.maps[index];
+    this.curIndex = index;
+    this.engine.loadMap(m.w, m.h, decodeTiles(m.tiles, m.w * m.h), this.project.seed);
+    this.engine.clearBlockers();
+    if (runtime) for (const n of m.npcs) this.engine.setBlocker(n.x, n.y);
+    const s = this.project.start;
+    this.engine.setSpawn(x ?? (s.map === m.id ? s.x : 0), y ?? (s.map === m.id ? s.y : 0));
+    this.world3dDirty = true;
+  }
+
+  /** Vuelca el mapa del motor al proyecto (solo en edición). */
+  commit() {
+    if (this.playing) return;
+    const m = this.map;
+    if (!m) return;
+    m.w = this.engine.width; m.h = this.engine.height;
+    m.tiles = encodeTiles(this.engine.tiles);
   }
 
   resizeMap(w: number, hh: number) {
-    const ow = this.engine.width, oh = this.engine.height;
-    const old = this.engine.tiles.slice();
+    this.commit();
+    const m = this.map;
+    const ow = m.w, oh = m.h;
+    const old = decodeTiles(m.tiles, ow * oh);
     const next = new Uint8Array(w * hh);
     for (let y = 0; y < Math.min(oh, hh); y++) for (let x = 0; x < Math.min(ow, w); x++) next[y * w + x] = old[y * ow + x];
-    this.engine.loadMap(w, hh, next, this.project.seed);
-    this.spawn = { x: Math.min(this.spawn.x, w - 1), y: Math.min(this.spawn.y, hh - 1) };
-    this.engine.setSpawn(this.spawn.x, this.spawn.y);
+    m.w = w; m.h = hh; m.tiles = encodeTiles(next);
+    m.npcs = m.npcs.filter((n) => n.x < w && n.y < hh);
+    m.warps = m.warps.filter((k) => k.x < w && k.y < hh);
+    const s = this.project.start;
+    if (s.map === m.id) this.project.start = { map: m.id, x: Math.min(s.x, w - 1), y: Math.min(s.y, hh - 1) };
+    this.loadIntoEngine(this.curIndex, false);
     this.undo = []; this.redo = [];
+    this.select(null);
     this.onEdit();
+    this.fit();
   }
 
   fit() {
@@ -97,32 +150,90 @@ export class MapView {
     this.cam.zoom = Math.max(1, Math.min(8, Math.floor(Math.min(this.cssW / mw, this.cssH / mh) * 4) / 4)) || 2;
     this.cam.x = mw / 2 - this.cssW / this.cam.zoom / 2;
     this.cam.y = mh / 2 - this.cssH / this.cam.zoom / 2;
+    this.cam3.dist = Math.min(60, Math.max(9, Math.max(this.engine.width, this.engine.height) * 0.95));
+    this.cam3.yaw = 0;
+  }
+
+  select(s: Selection) { this.selection = s; this.onSelect(s); }
+  deleteSelection() {
+    const s = this.selection;
+    if (!s) return;
+    (s.kind === "npc" ? this.map.npcs : this.map.warps).splice(s.index, 1);
+    this.select(null);
+    this.onEdit();
+  }
+  markDirty() { this.world3dDirty = true; }
+
+  // ----- Modo 3D -----
+  async set3D(on: boolean): Promise<boolean> {
+    if (on && !this.r3d) {
+      try {
+        const c = h("canvas", { class: "gl3d" });
+        this.el.prepend(c);
+        this.r3d = await Renderer3D.create(c);
+        this.gl3d = c;
+        if (this.atlas) this.r3d.setAtlas(this.atlas);
+        this.onResize();
+      } catch (e) {
+        this.gl3d?.remove();
+        this.onMessage("El modo 3D necesita WebGPU, que no está disponible en este navegador.");
+        console.warn(e);
+        return false;
+      }
+    }
+    this.mode3d = on;
+    this.world3dDirty = true;
+    this.gl.style.display = on ? "none" : "";
+    if (this.gl3d) this.gl3d.style.display = on ? "" : "none";
+    if (on) { this.cam3.yaw = 0; this.cam3.dist = this.playing ? 13 : this.cam3.dist; }
+    return true;
   }
 
   // ----- Jugar -----
   startPlay() {
-    this.engine.setSpawn(this.spawn.x, this.spawn.y);
+    this.commit();
+    this.editIndex = this.curIndex;
     this.playing = true;
-    this.paused = false;
     this.acc = 0;
-    this.hideDialog();
-    this.onMessage("Modo prueba: mueve con flechas / WASD. Hierba alta = encuentros.");
-  }
-  stopPlay() {
-    this.playing = false;
-    this.paused = false;
-    this.hideDialog();
-    this.engine.setSpawn(this.spawn.x, this.spawn.y);
+    const host: Host = {
+      loadMap: (i, x, y) => { this.loadIntoEngine(i, true, x, y); this.select(null); },
+      dialog: (who, lines) => this.dialog(who, lines),
+      battle: async (b: Battle) => { await runBattleUi(this.el, this.project, b); },
+      say: (m) => this.onMessage(m),
+    };
+    this.game = new Game(this.project, this.engine, host);
+    this.game.start();
+    if (this.mode3d) { this.cam3.dist = 13; }
+    (document.activeElement as HTMLElement | null)?.blur();
+    startMusic();
+    this.onMessage("Modo prueba: flechas/WASD mover · Enter/Espacio/Z interactuar" + (this.mode3d ? " · Q/E girar cámara" : "") + ".");
   }
 
-  private showDialog(text: string) {
-    this.dialog.textContent = text + "  ▼";
-    this.dialog.hidden = false;
-    this.paused = true;
+  stopPlay() {
+    if (!this.playing) return;
+    this.playing = false;
+    this.game = null;
+    this.advance = null;
+    this.dialogEl.hidden = true;
+    this.el.querySelector(".battle")?.remove();
+    stopMusic();
+    this.loadIntoEngine(this.editIndex, false);
+    this.fit();
   }
-  private hideDialog() {
-    this.dialog.hidden = true;
-    this.paused = false;
+
+  private dialog(speaker: string | null, lines: string[]): Promise<void> {
+    return new Promise((res) => {
+      let i = 0;
+      const show = () => {
+        this.dialogEl.replaceChildren(...(speaker ? [h("b", { class: "who" }, speaker)] : []), h("div", {}, lines[i] + "  ▼"));
+        this.dialogEl.hidden = false;
+      };
+      this.advance = () => {
+        sfx("talk");
+        if (++i >= lines.length) { this.dialogEl.hidden = true; this.advance = null; res(); } else show();
+      };
+      show();
+    });
   }
 
   // ----- Edición -----
@@ -133,6 +244,7 @@ export class MapView {
     if (!s) return;
     for (const e of s) this.engine.tiles[e.idx] = e[key];
     to.push(s);
+    this.world3dDirty = true;
     this.onEdit();
   }
 
@@ -145,6 +257,7 @@ export class MapView {
     const prev = this.stroke!.get(idx);
     this.stroke!.set(idx, { idx, from: prev ? prev.from : cur, to: t });
     this.engine.tiles[idx] = t;
+    this.world3dDirty = true;
   }
 
   private flood(sx: number, sy: number, t: number) {
@@ -168,18 +281,33 @@ export class MapView {
     return { x: Math.floor(wx / TILE), y: Math.floor(wy / TILE) };
   }
 
+  private inMap(x: number, y: number) { return x >= 0 && y >= 0 && x < this.engine.width && y < this.engine.height; }
+
   private act(e: PointerEvent, first: boolean) {
     const { x, y } = this.toTile(e);
+    const m = this.map;
     if (this.tool === "paint") this.setTileTracked(x, y, this.tile);
     else if (first && this.tool === "fill") this.flood(x, y, this.tile);
-    else if (first && this.tool === "pick") {
-      if (x >= 0 && y >= 0 && x < this.engine.width && y < this.engine.height) this.onPick(this.engine.getTile(x, y));
-    } else if (first && this.tool === "spawn") {
-      if (x >= 0 && y >= 0 && x < this.engine.width && y < this.engine.height) {
-        this.spawn = { x, y };
-        this.engine.setSpawn(x, y);
+    else if (first && this.tool === "pick") { if (this.inMap(x, y)) this.onPick(this.engine.getTile(x, y)); }
+    else if (first && this.tool === "spawn") {
+      if (this.inMap(x, y)) { this.project.start = { map: m.id, x, y }; this.engine.setSpawn(x, y); this.onEdit(); }
+    } else if (first && this.tool === "npc" && this.inMap(x, y)) {
+      let i = m.npcs.findIndex((n) => n.x === x && n.y === y);
+      if (i < 0) {
+        const n: Npc = { id: uniqueId(m.npcs.map((k) => k.id), "npc"), x, y, look: m.npcs.length % 4, dir: 0, kind: "talk", name: "NPC", lines: ["¡Hola!"] };
+        m.npcs.push(n); i = m.npcs.length - 1;
         this.onEdit();
       }
+      this.select({ kind: "npc", index: i });
+    } else if (first && this.tool === "warp" && this.inMap(x, y)) {
+      let i = m.warps.findIndex((k) => k.x === x && k.y === y);
+      if (i < 0) {
+        const other = this.project.maps.find((k) => k.id !== m.id) ?? m;
+        m.warps.push({ x, y, toMap: other.id, toX: Math.min(1, other.w - 1), toY: Math.min(1, other.h - 1) });
+        i = m.warps.length - 1;
+        this.onEdit();
+      }
+      this.select({ kind: "warp", index: i });
     }
   }
 
@@ -189,6 +317,7 @@ export class MapView {
     el.addEventListener("pointerdown", (e) => {
       if (this.playing) return;
       el.setPointerCapture(e.pointerId);
+      if (this.mode3d) { this.orbit = { x: e.clientX, y: e.clientY, yaw: this.cam3.yaw, pitch: this.cam3.pitch }; return; }
       if (e.button === 1 || e.button === 2 || this.spaceDown) {
         this.pan = { x: e.clientX, y: e.clientY, cx: this.cam.x, cy: this.cam.y };
         return;
@@ -198,6 +327,11 @@ export class MapView {
       this.act(e, true);
     });
     el.addEventListener("pointermove", (e) => {
+      if (this.orbit) {
+        this.cam3.yaw = this.orbit.yaw - (e.clientX - this.orbit.x) * 0.008;
+        this.cam3.pitch = Math.min(1.45, Math.max(0.3, this.orbit.pitch + (e.clientY - this.orbit.y) * 0.006));
+        return;
+      }
       this.hover = this.toTile(e);
       if (this.pan) {
         this.cam.x = this.pan.cx - (e.clientX - this.pan.x) / this.cam.zoom;
@@ -205,7 +339,7 @@ export class MapView {
       } else if (this.stroke) this.act(e, false);
     });
     const end = () => {
-      this.pan = null;
+      this.pan = null; this.orbit = null;
       if (this.stroke) {
         if (this.stroke.size) { this.undo.push([...this.stroke.values()]); this.redo = []; this.onEdit(); }
         this.stroke = null;
@@ -215,8 +349,9 @@ export class MapView {
     el.addEventListener("pointercancel", end);
     el.addEventListener("pointerleave", () => (this.hover = null));
     el.addEventListener("wheel", (e) => {
-      if (this.playing) return;
       e.preventDefault();
+      if (this.mode3d) { this.cam3.dist = Math.min(60, Math.max(3, this.cam3.dist * (e.deltaY < 0 ? 0.9 : 1.1))); return; }
+      if (this.playing) return;
       const r = this.el.getBoundingClientRect();
       const mx = e.clientX - r.left, my = e.clientY - r.top;
       const wx = this.cam.x + mx / this.cam.zoom, wy = this.cam.y + my / this.cam.zoom;
@@ -224,17 +359,21 @@ export class MapView {
       this.cam.x = wx - mx / this.cam.zoom;
       this.cam.y = wy - my / this.cam.zoom;
     }, { passive: false });
-    el.addEventListener("click", () => { if (this.playing && this.paused) this.hideDialog(); });
+    el.addEventListener("click", () => { if (this.advance) this.advance(); });
+    this.dialogEl.addEventListener("click", () => this.advance?.());
 
     const typing = (e: KeyboardEvent) => ["INPUT", "SELECT", "TEXTAREA"].includes((e.target as HTMLElement).tagName);
     window.addEventListener("keydown", (e) => {
       if (typing(e)) return;
       if (e.code === "Space") this.spaceDown = true;
       if (this.playing) {
-        if ((e.code === "Enter" || e.code === "Space" || e.code === "KeyZ") && this.paused) this.hideDialog();
-        if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
+        if (e.code.startsWith("Arrow") || e.code === "Space" || e.code === "Enter") e.preventDefault();
+        if (!e.repeat && (e.code === "Enter" || e.code === "Space" || e.code === "KeyZ")) {
+          if (this.advance) this.advance(); else this.game?.interact();
+        }
       } else if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") { e.preventDefault(); e.shiftKey ? this.redoEdit() : this.undoEdit(); }
       else if ((e.ctrlKey || e.metaKey) && e.code === "KeyY") { e.preventDefault(); this.redoEdit(); }
+      else if ((e.code === "Delete" || e.code === "Backspace") && this.selection) this.deleteSelection();
       this.keys.add(e.code);
     });
     window.addEventListener("keyup", (e) => { if (e.code === "Space") this.spaceDown = false; this.keys.delete(e.code); });
@@ -248,6 +387,7 @@ export class MapView {
     const pw = Math.round(this.cssW * this.dpr), ph = Math.round(this.cssH * this.dpr);
     this.gl.width = pw; this.gl.height = ph;
     this.renderer.resize(pw, ph);
+    if (this.gl3d) { this.gl3d.width = pw; this.gl3d.height = ph; this.r3d?.resize(pw, ph); }
     this.overlay.width = pw; this.overlay.height = ph;
   }
 
@@ -264,30 +404,50 @@ export class MapView {
   private frame(t: number) {
     const dt = Math.min(0.1, (t - this.last) / 1000 || 0);
     this.last = t;
-    if (this.playing && !this.paused) {
+    const g = this.game;
+    if (this.playing && g && !g.busy) {
       this.acc += dt;
-      while (this.acc >= 1 / 60) {
+      while (this.acc >= 1 / 60 && !g.busy) {
         this.acc -= 1 / 60;
-        const ev = this.engine.tick(this.inputBits());
-        if (ev & Ev.Encounter) {
-          const enc = this.project.encounters;
-          const id = enc.length ? enc[this.engine.rand(enc.length)] : null;
-          const sp = this.project.species.find((s) => s.id === id);
-          const lvl = 3 + this.engine.rand(5);
-          this.showDialog(sp ? `¡Un ${sp.name} salvaje (Nv. ${lvl}) apareció!` : "¡Algo se movió en la hierba!");
-          this.onEncounter(sp?.id ?? null);
-          break;
-        }
+        g.onTick(this.engine.tick(this.inputBits()));
       }
     }
-    this.render();
+    if (this.mode3d) {
+      if (this.keys.has("KeyQ")) this.cam3.yaw -= dt * 1.8;
+      if (this.keys.has("KeyE")) this.cam3.yaw += dt * 1.8;
+      this.render3d();
+    } else this.render();
     requestAnimationFrame((tt) => this.frame(tt));
+  }
+
+  private npcSprite(n: Npc) {
+    const dir = this.playing && this.game ? this.game.npcDir(n) : n.dir;
+    return NPC_SPRITE + (n.look % 4) * 4 + dir;
+  }
+
+  private render3d() {
+    const r = this.r3d;
+    if (!r) return;
+    if (this.world3dDirty) { r.setWorld(this.engine.tiles, this.engine.width, this.engine.height); this.world3dDirty = false; }
+    const pl = this.engine.player;
+    const ents: Entity3D[] = this.map.npcs.map((n) => ({ x: n.x, y: n.y, sprite: NPC_SPRITE + (n.look % 4) * 4, dir: this.playing && this.game ? this.game.npcDir(n) : n.dir }));
+    if (this.playing) {
+      ents.push({ x: pl.x, y: pl.y, sprite: PLAYER_SPRITE, dir: pl.dir });
+      const k = 0.18;
+      this.cam3.x += (pl.x + 0.5 - this.cam3.x) * k;
+      this.cam3.z += (pl.y + 0.5 - this.cam3.z) * k;
+    } else {
+      const s = this.project.start;
+      if (s.map === this.map.id) ents.push({ x: s.x, y: s.y, sprite: PLAYER_SPRITE, dir: 0 });
+      this.cam3.x = this.engine.width / 2; this.cam3.z = this.engine.height / 2;
+    }
+    r.draw(this.cam3, ents);
+    this.og.clearRect(0, 0, this.overlay.width, this.overlay.height);
   }
 
   private render() {
     const e = this.engine, w = e.width, hh = e.height;
     const player = e.player;
-    // Cámara
     let zoom = this.cam.zoom;
     if (this.playing) {
       zoom = Math.max(2, Math.floor(Math.min(this.cssW / (15 * TILE), this.cssH / (10 * TILE))));
@@ -299,18 +459,15 @@ export class MapView {
     const x1 = Math.min(w - 1, Math.ceil((this.cam.x + this.cssW / zoom) / TILE)), y1 = Math.min(hh - 1, Math.ceil((this.cam.y + this.cssH / zoom) / TILE));
     const tiles = e.tiles;
     let n = 0;
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-      const o = n++ * 4;
-      this.inst[o] = x * TILE; this.inst[o + 1] = y * TILE; this.inst[o + 2] = tiles[y * w + x]; this.inst[o + 3] = 0;
-    }
-    const px = this.playing ? player.x : this.spawn.x, py = this.playing ? player.y : this.spawn.y;
-    const o = n++ * 4;
-    this.inst[o] = Math.round(px * TILE); this.inst[o + 1] = Math.round(py * TILE) - 2; this.inst[o + 2] = PLAYER_SPRITE + (this.playing ? player.dir : 0); this.inst[o + 3] = 0;
-    this.renderer.draw({
-      instances: this.inst, count: n,
-      offsetX: this.cam.x, offsetY: this.cam.y, scale,
-      clear: [0.07, 0.08, 0.11],
-    });
+    const put = (x: number, y: number, idx: number) => { const o = n++ * 4; this.inst[o] = x; this.inst[o + 1] = y; this.inst[o + 2] = idx; this.inst[o + 3] = 0; };
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) put(x * TILE, y * TILE, tiles[y * w + x]);
+    // entidades ordenadas por Y para el solape correcto
+    const ents: { y: number; px: number; py: number; idx: number }[] = this.map.npcs.map((k) => ({ y: k.y, px: k.x * TILE, py: k.y * TILE - 2, idx: this.npcSprite(k) }));
+    if (this.playing) ents.push({ y: player.y, px: Math.round(player.x * TILE), py: Math.round(player.y * TILE) - 2, idx: PLAYER_SPRITE + player.dir });
+    else if (this.project.start.map === this.map.id) ents.push({ y: this.project.start.y, px: this.project.start.x * TILE, py: this.project.start.y * TILE - 2, idx: PLAYER_SPRITE });
+    ents.sort((a, b) => a.y - b.y);
+    for (const k of ents) if (n < MAX_INSTANCES) put(k.px, k.py, k.idx);
+    this.renderer.draw({ instances: this.inst, count: n, offsetX: this.cam.x, offsetY: this.cam.y, scale, clear: [0.07, 0.08, 0.11] });
     this.drawOverlay(zoom, x0, y0, x1, y1);
   }
 
@@ -323,6 +480,7 @@ export class MapView {
       g.fillStyle = "rgba(255,40,40,0.35)";
       const t = this.engine.tiles, w = this.engine.width;
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (this.engine.isSolid(t[y * w + x])) g.fillRect(sx(x), sy(y), ts, ts);
+      for (const n of this.map.npcs) g.fillRect(sx(n.x), sy(n.y), ts, ts);
     }
     if (this.showGrid && zoom >= 1.5) {
       g.strokeStyle = "rgba(255,255,255,0.18)";
@@ -332,14 +490,25 @@ export class MapView {
       for (let y = y0; y <= y1 + 1; y++) { const Y = Math.round(sy(y)) + 0.5; g.moveTo(sx(x0), Y); g.lineTo(sx(x1 + 1), Y); }
       g.stroke();
     }
-    // Borde del mapa
     g.strokeStyle = "#ffd54f"; g.lineWidth = 2;
     g.strokeRect(sx(0), sy(0), this.engine.width * ts, this.engine.height * ts);
-    // Marca de inicio
-    g.strokeStyle = "#4fc3f7"; g.lineWidth = 2;
-    g.strokeRect(sx(this.spawn.x) + 1, sy(this.spawn.y) + 1, ts - 2, ts - 2);
-    // Hover
-    if (this.hover && this.hover.x >= 0 && this.hover.y >= 0 && this.hover.x < this.engine.width && this.hover.y < this.engine.height) {
+    const st = this.project.start;
+    if (st.map === this.map.id) { g.strokeStyle = "#4fc3f7"; g.lineWidth = 2; g.strokeRect(sx(st.x) + 1, sy(st.y) + 1, ts - 2, ts - 2); }
+    // saltos
+    g.font = `bold ${Math.max(9, 10 * this.dpr * Math.min(zoom, 3) / 2)}px system-ui, sans-serif`;
+    this.map.warps.forEach((wp, i) => {
+      g.fillStyle = "rgba(171,71,188,0.45)"; g.fillRect(sx(wp.x), sy(wp.y), ts, ts);
+      g.strokeStyle = this.selection?.kind === "warp" && this.selection.index === i ? "#fff" : "#ce93d8"; g.lineWidth = 2;
+      g.strokeRect(sx(wp.x) + 1, sy(wp.y) + 1, ts - 2, ts - 2);
+      g.fillStyle = "#fff"; g.fillText("↦", sx(wp.x) + ts * 0.3, sy(wp.y) + ts * 0.7);
+    });
+    this.map.npcs.forEach((n, i) => {
+      const sel = this.selection?.kind === "npc" && this.selection.index === i;
+      g.strokeStyle = sel ? "#fff" : n.kind === "trainer" ? "#ff8a65" : n.kind === "healer" ? "#81c784" : "#fff59d";
+      g.lineWidth = sel ? 3 : 1.5;
+      g.strokeRect(sx(n.x) + 1, sy(n.y) + 1, ts - 2, ts - 2);
+    });
+    if (this.hover && this.inMap(this.hover.x, this.hover.y)) {
       g.fillStyle = "rgba(255,255,255,0.22)";
       g.fillRect(sx(this.hover.x), sy(this.hover.y), ts, ts);
       const def = TILE_DEFS[this.engine.getTile(this.hover.x, this.hover.y)];

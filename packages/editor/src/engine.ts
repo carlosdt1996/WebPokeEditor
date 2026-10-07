@@ -21,6 +21,11 @@ interface Exports {
   engine_steps(): number;
   engine_rand(max: number): number;
   engine_is_solid(t: number): number;
+  engine_clear_blockers(): void;
+  engine_set_blocker(x: number, y: number, v: number): void;
+  engine_walkable(x: number, y: number): number;
+  engine_cell_x(): number;
+  engine_cell_y(): number;
   engine_damage(level: number, power: number, atk: number, def: number, mult: number, roll: number): number;
 }
 
@@ -64,6 +69,11 @@ export class Engine {
     };
   }
   get steps() { return this.x.engine_steps(); }
+  clearBlockers() { this.x.engine_clear_blockers(); }
+  setBlocker(x: number, y: number, v = 1) { this.x.engine_set_blocker(x, y, v); }
+  walkable(x: number, y: number) { return this.x.engine_walkable(x, y) === 1; }
+  /** Celda lógica del jugador (destino si se está moviendo). */
+  get cell() { return { x: this.x.engine_cell_x(), y: this.x.engine_cell_y() }; }
   rand(max: number) { return this.x.engine_rand(max); }
   isSolid(t: number) { return this.x.engine_is_solid(t) === 1; }
   damage(level: number, power: number, atk: number, def: number, multX100: number, roll: number) {

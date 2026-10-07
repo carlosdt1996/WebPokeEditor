@@ -17,3 +17,6 @@ Por `id`, nunca por índice, para permitir reordenar y mods. El *validator* en `
 
 ## Migraciones
 Cada cambio de esquema incrementa `schemaVersion` e incluye migración + test.
+
+## Estado actual (schemaVersion 2)
+`Project` contiene `maps[]` (cada `GameMap` con `tiles` en base64, `npcs[]`, `warps[]`, `encounters[]` y `encounterLevel`), `start`, `party[]`, `inventory`, `types`/`typeChart`, `species[]` (con `sprite?` importado), `moves[]` y `atlas?` importado. La migración v1→v2 está en `migrate()` (`project.ts`) con test.

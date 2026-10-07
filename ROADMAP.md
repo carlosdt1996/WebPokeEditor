@@ -6,37 +6,39 @@ Leyenda: `[x]` hecho · `[~]` parcial (MVP) · `[ ]` pendiente
 - [x] Monorepo (Cargo workspace + npm workspaces)
 - [x] CI: lint, tests, build WASM
 - [x] Prototipo "hello triangle" WebGPU + módulo WASM
-- [ ] ADRs iniciales (lenguaje, render, formato de proyecto)
+- [x] ADRs iniciales (lenguaje, render, formato, 3D, assets)
 
 ## Fase 1 — Render y mapas (MVP técnico)
-- [~] Renderer WebGPU de tilemaps (capas, animación de tiles)
+- [x] Renderer WebGPU de tilemaps (2D + 3D). Pendiente: capas múltiples y tiles animados
 - [x] Sprites y atlas de texturas
-- [~] Editor de mapas: pintar, rellenar, capas, colisiones
-- [ ] Formato de proyecto v0 y guardado en OPFS
+- [x] Editor de mapas: pintar, rellenar, colisiones, varios mapas, NPC y saltos. Pendiente: capas
+- [~] Formato de proyecto versionado con migraciones; guardado en localStorage (pendiente OPFS)
 
 ## Fase 2 — Jugabilidad base
-- [~] Movimiento del jugador en grid, colisiones, warps
-- [ ] Diálogos y menús
-- [ ] Máquina de eventos/scripts v0
+- [x] Movimiento del jugador en grid, colisiones, warps
+- [x] Diálogos y menús de combate
+- [~] Eventos por NPC/salto (pendiente: VM de scripts)
 - [x] Modo "Probar" dentro del editor
 
 ## Fase 3 — Datos Pokémon
-- [~] Editor de especies, tipos, stats, evoluciones, learnsets
-- [x] Editor de movimientos y objetos
-- [ ] Editor de trainers y encuentros salvajes
-- [x] Importar/exportar datos (JSON/CSV)
+- [~] Editor de especies, stats, movimientos, equipo (pendiente: evoluciones, learnsets por nivel, objetos)
+- [~] Editor de movimientos (pendiente: objetos genéricos)
+- [x] Editor de trainers y encuentros salvajes
+- [~] Importar/exportar proyecto en JSON (pendiente CSV)
 
 ## Fase 4 — Combate
-- [ ] Simulador determinista de combate (1v1, luego dobles)
+- [~] Combate determinista 1v1 jugable (pendiente: dobles)
 - [ ] Habilidades y efectos de movimientos mediante datos + scripts
-- [ ] UI y animaciones de combate
+- [~] UI de combate (animaciones básicas)
 
 ## Fase 5 — Exportación y comunidad
-- [~] Export web (paquete estático) y PWA
+- [~] Export: JSON del proyecto; pendiente paquete jugable/PWA
 - [ ] Export de escritorio (Tauri/Electron) opcional
 - [ ] Sistema de plugins/mods
 - [ ] Compartir proyectos, plantillas y tilesets
 
 ## Fase 6 — Pulido
+- [x] Modo 3D estilo DS (vista)
+- [x] Audio sintetizado (SFX + música)
 - [ ] Rendimiento, accesibilidad, i18n
 - [ ] Documentación de usuario y tutoriales
