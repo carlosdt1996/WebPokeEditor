@@ -62,7 +62,7 @@ async function main() {
         const i = atlasIndex(d.id);
         g.drawImage(atlas, (i % ATLAS_COLS) * TILE, Math.floor(i / ATLAS_COLS) * TILE, TILE, TILE, 0, 0, TILE, TILE);
       } else { const g = c.getContext("2d")!; g.strokeStyle = "#e53935"; g.lineWidth = 2; g.beginPath(); g.moveTo(2, 2); g.lineTo(14, 14); g.moveTo(14, 2); g.lineTo(2, 14); g.stroke(); }
-      const b = h("button", { class: "swatch", onclick: () => { selectTile(d.id); if (["pick", "spawn", "npc", "warp", "raise", "lower"].includes(view.tool)) setTool("paint"); } }, c, h("span", {}, d.name));
+      const b = h("button", { class: "swatch", onclick: () => { selectTile(d.id); if (["pick", "spawn", "npc", "warp", "trigger", "raise", "lower"].includes(view.tool)) setTool("paint"); } }, c, h("span", {}, d.name));
       b.dataset.id = String(d.id);
       swatches.push(b); palette.append(b);
     }
@@ -80,13 +80,13 @@ async function main() {
   const toolBtns = new Map<Tool, HTMLElement>();
   const setTool = (t: Tool) => { view.tool = t; toolBtns.forEach((b, k) => b.classList.toggle("sel", k === t)); };
   const tools = h("div", { class: "tools" });
-  for (const [t, label, key] of [["paint", "✏️ Pintar", "B"], ["fill", "🪣 Rellenar", "G"], ["pick", "💧 Cuentagotas", "I"], ["spawn", "📍 Inicio", "P"], ["npc", "🧑 NPC", "N"], ["warp", "🚪 Salto", "J"], ["raise", "⛰ Elevar", "U"], ["lower", "🕳 Bajar", "H"]] as [Tool, string, string][]) {
+  for (const [t, label, key] of [["paint", "✏️ Pintar", "B"], ["fill", "🪣 Rellenar", "G"], ["pick", "💧 Cuentagotas", "I"], ["spawn", "📍 Inicio", "P"], ["npc", "🧑 NPC", "N"], ["warp", "🚪 Salto", "J"], ["trigger", "⚡ Disparador", "T"], ["raise", "⛰ Elevar", "U"], ["lower", "🕳 Bajar", "H"]] as [Tool, string, string][]) {
     const b = h("button", { title: `${label} (${key})`, onclick: () => setTool(t) }, label);
     toolBtns.set(t, b); tools.append(b);
   }
   window.addEventListener("keydown", (e) => {
     if (["INPUT", "SELECT", "TEXTAREA"].includes((e.target as HTMLElement).tagName) || e.ctrlKey || e.metaKey || view.playing) return;
-    const m: Record<string, Tool> = { KeyB: "paint", KeyG: "fill", KeyI: "pick", KeyP: "spawn", KeyN: "npc", KeyJ: "warp", KeyU: "raise", KeyH: "lower" };
+    const m: Record<string, Tool> = { KeyB: "paint", KeyG: "fill", KeyI: "pick", KeyP: "spawn", KeyN: "npc", KeyJ: "warp", KeyT: "trigger", KeyU: "raise", KeyH: "lower" };
     if (m[e.code]) setTool(m[e.code]);
   });
 
@@ -125,7 +125,7 @@ async function main() {
   };
 
   const sizeInfo = h("span", { class: "muted" });
-  const sizeLabel = () => (sizeInfo.textContent = `${engine.width}×${engine.height} tiles · ${view.map?.npcs.length ?? 0} NPC · ${view.map?.warps.length ?? 0} saltos`);
+  const sizeLabel = () => (sizeInfo.textContent = `${engine.width}×${engine.height} tiles · ${view.map?.npcs.length ?? 0} NPC · ${view.map?.warps.length ?? 0} saltos · ${view.map?.triggers?.length ?? 0} disparadores`);
   const wIn = h("input", { type: "number", min: 4, max: 128, class: "n" }), hIn = h("input", { type: "number", min: 4, max: 128, class: "n" });
   const sync = () => { wIn.value = String(engine.width); hIn.value = String(engine.height); refreshMaps(); sizeLabel(); };
   const sizeBox = h("div", { class: "row" }, "Tamaño", wIn, "×", hIn,
@@ -141,9 +141,17 @@ async function main() {
   const lines = (arr: string[] | undefined, on: (a: string[]) => void) =>
     h("textarea", { rows: 3, value: (arr ?? []).join("\n"), oninput: (e: Event) => { on((e.target as HTMLTextAreaElement).value.split("\n").filter((l) => l.trim())); persist(); } });
 
+  const scriptEditor = (get: () => string, set: (v: string) => void) => {
+    const errBox = h("div", { class: "errs" });
+    const check2 = () => { const r = parseScript(get()); errBox.textContent = r.ok ? "✓ Script válido" : r.errors.join("\n"); errBox.classList.toggle("bad", !r.ok); };
+    const ta = h("textarea", { rows: 9, class: "code", spellcheck: false, value: get(), oninput: (e: Event) => { set((e.target as HTMLTextAreaElement).value); check2(); persist(); } });
+    check2();
+    return [field("Script (una orden por línea)", ta), errBox, h("details", {}, h("summary", {}, "Ayuda de órdenes"), h("pre", { class: "help" }, SCRIPT_HELP))];
+  };
+
   const renderInspector = (s: Selection) => {
     inspector.replaceChildren();
-    if (!s) { inspector.append(h("p", { class: "hint" }, "Usa las herramientas 🧑 NPC o 🚪 Salto y haz clic en el mapa para crear o seleccionar elementos.")); return; }
+    if (!s) { inspector.append(h("p", { class: "hint" }, "Usa las herramientas 🧑 NPC, 🚪 Salto o ⚡ Disparador y haz clic en el mapa para crear o seleccionar elementos.")); return; }
     if (s.kind === "npc") {
       const n: Npc | undefined = view.map.npcs[s.index];
       if (!n) return;
@@ -157,15 +165,7 @@ async function main() {
         field("Posición", numIn(n.x, (v) => (n.x = v), 0, engine.width - 1), numIn(n.y, (v) => (n.y = v), 0, engine.height - 1)),
         ...(n.kind === "script" ? [] : [field("Diálogo (una línea por mensaje)", lines(n.lines, (a) => (n.lines = a)))]),
       );
-      if (n.kind === "script") {
-        const errBox = h("div", { class: "errs" });
-        const check2 = () => { const r = parseScript(n.script ?? ""); errBox.textContent = r.ok ? "✓ Script válido" : r.errors.join("\n"); errBox.classList.toggle("bad", !r.ok); };
-        inspector.append(
-          field("Script (una orden por línea)", h("textarea", { rows: 9, class: "code", spellcheck: false, value: n.script ?? "", oninput: (e: Event) => { n.script = (e.target as HTMLTextAreaElement).value; check2(); persist(); } })),
-          errBox, h("details", {}, h("summary", {}, "Ayuda de órdenes"), h("pre", { class: "help" }, SCRIPT_HELP)),
-        );
-        check2();
-      }
+      if (n.kind === "script") inspector.append(...scriptEditor(() => n.script ?? "", (v) => (n.script = v)));
       if (n.kind === "trainer") {
         const team = n.team ?? (n.team = []);
         inspector.append(h("h3", {}, "Equipo del entrenador"),
@@ -176,6 +176,16 @@ async function main() {
           h("button", { disabled: team.length >= 6, onclick: () => { team.push({ species: project.species[0]?.id ?? "", level: 5 }); persist(); renderInspector(s); } }, "+ Criatura"),
           field("Tras perder", lines(n.defeatedLines, (a) => (n.defeatedLines = a))));
       }
+    } else if (s.kind === "trigger") {
+      const t = view.map.triggers?.[s.index];
+      if (!t) return;
+      inspector.append(
+        h("h3", {}, "Disparador"),
+        field("Nombre", h("input", { type: "text", value: t.name, oninput: (e: Event) => { t.name = (e.target as HTMLInputElement).value; persist(); } })),
+        field("Posición", numIn(t.x, (v) => (t.x = v), 0, engine.width - 1), numIn(t.y, (v) => (t.y = v), 0, engine.height - 1)),
+        h("label", { class: "check" }, h("input", { type: "checkbox", checked: t.once, onchange: (e: Event) => { t.once = (e.target as HTMLInputElement).checked; persist(); } }), "Solo la primera vez"),
+        ...scriptEditor(() => t.script, (v) => (t.script = v)),
+      );
     } else {
       const w: Warp | undefined = view.map.warps[s.index];
       if (!w) return;

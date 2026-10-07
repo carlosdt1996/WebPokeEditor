@@ -10,8 +10,8 @@ import { type Cam3D, type Entity3D, Renderer3D } from "./renderer3d";
 import { ANIM_MS, ERASE_OBJECT, NPC_SPRITE, OBJECT_MIN, PLAYER_SPRITE, TILE, TILE_ANIM, TILE_DEFS, TILE_HEIGHT, atlasIndex } from "./tiles";
 import { runBattleUi } from "./ui/battleUi";
 
-export type Tool = "paint" | "fill" | "pick" | "spawn" | "npc" | "warp" | "raise" | "lower";
-export type Selection = { kind: "npc" | "warp"; index: number } | null;
+export type Tool = "paint" | "fill" | "pick" | "spawn" | "npc" | "warp" | "trigger" | "raise" | "lower";
+export type Selection = { kind: "npc" | "warp" | "trigger"; index: number } | null;
 
 /** layer: 0 suelo, 1 objetos, 2 alturas */
 interface Edit { layer: 0 | 1 | 2; idx: number; from: number; to: number }
@@ -152,6 +152,7 @@ export class MapView {
     m.heights = hs.some((v) => v !== 128) ? encodeTiles(hs) : undefined;
     m.npcs = m.npcs.filter((n) => n.x < w && n.y < hh);
     m.warps = m.warps.filter((k) => k.x < w && k.y < hh);
+    if (m.triggers) m.triggers = m.triggers.filter((k) => k.x < w && k.y < hh);
     const s = this.project.start;
     if (s.map === m.id) this.project.start = { map: m.id, x: Math.min(s.x, w - 1), y: Math.min(s.y, hh - 1) };
     this.loadIntoEngine(this.curIndex, false);
@@ -174,7 +175,7 @@ export class MapView {
   deleteSelection() {
     const s = this.selection;
     if (!s) return;
-    (s.kind === "npc" ? this.map.npcs : this.map.warps).splice(s.index, 1);
+    (s.kind === "npc" ? this.map.npcs : s.kind === "warp" ? this.map.warps : (this.map.triggers ??= [])).splice(s.index, 1);
     this.select(null);
     this.onEdit();
   }
@@ -334,6 +335,11 @@ export class MapView {
         this.onEdit();
       }
       this.select({ kind: "npc", index: i });
+    } else if (first && this.tool === "trigger" && this.inMap(x, y)) {
+      const list = (m.triggers ??= []);
+      let i = list.findIndex((k) => k.x === x && k.y === y);
+      if (i < 0) { list.push({ x, y, name: "Disparador", script: "say ¡Has pisado un disparador!", once: true }); i = list.length - 1; this.onEdit(); }
+      this.select({ kind: "trigger", index: i });
     } else if (first && this.tool === "warp" && this.inMap(x, y)) {
       let i = m.warps.findIndex((k) => k.x === x && k.y === y);
       if (i < 0) {
@@ -569,6 +575,13 @@ export class MapView {
       g.strokeStyle = this.selection?.kind === "warp" && this.selection.index === i ? "#fff" : "#ce93d8"; g.lineWidth = 2;
       g.strokeRect(sx(wp.x) + 1, sy(wp.y) + 1, ts - 2, ts - 2);
       g.fillStyle = "#fff"; g.fillText("↦", sx(wp.x) + ts * 0.3, sy(wp.y) + ts * 0.7);
+    });
+    (this.map.triggers ?? []).forEach((t, i) => {
+      const sel = this.selection?.kind === "trigger" && this.selection.index === i;
+      g.fillStyle = "rgba(255,193,7,0.28)"; g.fillRect(sx(t.x), sy(t.y), ts, ts);
+      g.strokeStyle = sel ? "#fff" : "#ffca28"; g.lineWidth = sel ? 3 : 1.5; g.setLineDash([4, 3]);
+      g.strokeRect(sx(t.x) + 1, sy(t.y) + 1, ts - 2, ts - 2); g.setLineDash([]);
+      g.fillStyle = "#fff"; g.fillText("⚡", sx(t.x) + ts * 0.25, sy(t.y) + ts * 0.7);
     });
     this.map.npcs.forEach((n, i) => {
       const sel = this.selection?.kind === "npc" && this.selection.index === i;

@@ -194,6 +194,64 @@ describe("scripts (VM en Rust)", () => {
   });
 });
 
+describe("scripts: variables, bucles y disparadores", () => {
+  const run = async (src: string, setup?: (e: Engine) => void) => {
+    const e = await Engine.load(wasm());
+    e.flagsReset();
+    setup?.(e);
+    const r = parseScript(src);
+    if (!r.ok) throw new Error(r.errors.join());
+    const log: string[] = [];
+    await runScript(r.code, {
+      say: async (l) => { log.push("say:" + l.join("|")); }, give: (i, n) => { log.push(`give:${i}:${n}`); }, heal: () => { log.push("heal"); },
+      battle: async (s, l) => { log.push(`battle:${s}:${l}`); }, givemon: (s, l) => { log.push(`givemon:${s}:${l}`); }, warp: async (m) => { log.push(`warp:${m}`); },
+    }, e);
+    return { log, e };
+  };
+
+  it("set/add, comparaciones numéricas y {interpolación}", async () => {
+    const { log, e } = await run("set x 5\nadd x -2\nif x == 3\nsay x vale {x}\nelse\nsay mal\nend\nif x >= 4\nsay mal\nend\nif x != 3\nsay mal\nend");
+    expect(log).toEqual(["say:x vale 3"]);
+    expect(e.getVar("x")).toBe(3);
+  });
+  it("while con variable, repeat y break", async () => {
+    const a = await run("while n < 3\nadd n 1\ngive potion 1\nend");
+    expect(a.log).toEqual(["give:potion:1", "give:potion:1", "give:potion:1"]);
+    const b = await run("repeat 4\nadd c 1\nend\nsay {c}");
+    expect(b.e.getVar("c")).toBe(4);
+    expect(b.log).toEqual(["say:4"]);
+    const c = await run("repeat 10\nadd c 1\nif c == 3\nbreak\nend\nend\nsay {c}");
+    expect(c.log).toEqual(["say:3"]);
+    const d = await run("repeat 0\nsay nunca\nend\nsay fin");
+    expect(d.log).toEqual(["say:fin"]);
+  });
+  it("bucles anidados y while sobre marcas", async () => {
+    const a = await run("repeat 3\nrepeat 2\nadd t 1\nend\nend\nsay {t}");
+    expect(a.log).toEqual(["say:6"]);
+    const b = await run("flag f\nwhile f\nadd k 1\nif k == 2\nunflag f\nend\nend\nsay {k}");
+    expect(b.log).toEqual(["say:2"]);
+  });
+  it("las variables predefinidas se pueden fijar desde el host", async () => {
+    const a = await run("if party >= 2\nsay equipo\nend", (e) => e.setVar("party", 2));
+    expect(a.log).toEqual(["say:equipo"]);
+  });
+  it("un bucle infinito con acciones se corta con error claro", async () => {
+    await expect(run("while x < 1\nheal\nend")).rejects.toThrow(/demasiadas acciones|bucle/);
+  });
+  it("errores de sintaxis nuevos", () => {
+    for (const bad of ["if x ~ 3\nend", "while x < a\nend", "repeat\nend", "break", "else", "set x", "add 1x 3", "while\nend"]) expect(parseScript(bad).ok).toBe(false);
+  });
+  it("el proyecto valida los scripts de los disparadores y su posición", () => {
+    const p = defaultProject();
+    expect(validate(p)).toEqual([]);
+    p.maps[0].triggers!.push({ x: 99, y: 0, name: "Roto", once: true, script: "give oro 1\nwarp ninguno 1 1" });
+    const errs = validate(p);
+    expect(errs.some((e) => e.includes("fuera del mapa"))).toBe(true);
+    expect(errs.some((e) => e.includes("oro"))).toBe(true);
+    expect(errs.some((e) => e.includes("ninguno"))).toBe(true);
+  });
+});
+
 describe("capa de objetos y colisiones", () => {
   it("los objetos sólidos bloquean y los decorativos no", async () => {
     const e = await Engine.load(wasm());

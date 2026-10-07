@@ -3,7 +3,7 @@ import { sfx } from "./audio";
 import { Battle, type Mon, healAll, makeMon } from "./battle";
 import { type ScriptCtx, parseScript, runScript } from "./script";
 import { type Engine, Ev } from "./engine";
-import type { GameMap, Npc, Project } from "./project";
+import type { GameMap, Npc, Project, Trigger } from "./project";
 
 export interface Host {
   /** Carga el mapa `index` en el motor (con bloqueadores de NPC) y coloca al jugador. */
@@ -24,6 +24,7 @@ export class Game {
   /** true mientras hay diálogo/combate/transición: el bucle no avanza la simulación. */
   busy = false;
   private npcDirs = new Map<string, number>();
+  private fired = new Set<string>();
 
   constructor(private p: Project, private e: Engine, private host: Host) {
     this.party = p.party.map((t) => makeMon(p, t.species, t.level));
@@ -56,10 +57,29 @@ export class Game {
       const { x, y } = this.e.cell;
       const warp = this.map.warps.find((w) => w.x === x && w.y === y);
       if (warp) { await this.warpTo(warp.toMap, warp.toX, warp.toY); return; }
+      const trig = (this.map.triggers ?? []).find((t) => t.x === x && t.y === y && !(t.once && this.fired.has(this.trigKey(t))));
+      if (trig) { this.fired.add(this.trigKey(trig)); await this.runTrigger(trig); return; }
       const spotter = this.map.npcs.find((n) => n.kind === "trainer" && !this.defeated.has(this.key(n)) && this.sees(n, x, y));
       if (spotter) { await this.challenge(spotter); return; }
       if (ev & Ev.Encounter) await this.wildEncounter();
     });
+  }
+
+  private trigKey(t: Trigger) { return `${this.map.id}/${t.x},${t.y}`; }
+
+  /** Variables que los scripts pueden leer: pasos dados, tamaño del equipo y nivel de la primera criatura. */
+  private refreshBuiltins() {
+    this.e.setVar("steps", this.e.steps);
+    this.e.setVar("party", this.party.length);
+    this.e.setVar("level", this.party[0]?.level ?? 0);
+  }
+
+  private async runTrigger(t: Trigger) {
+    const r = parseScript(t.script);
+    if (!r.ok) { this.host.say(`Disparador "${t.name}" con errores: ${r.errors[0]}`); return; }
+    this.refreshBuiltins();
+    try { await runScript(r.code, this.scriptCtx(null, t.name), this.e); }
+    catch (err) { this.host.say((err as Error).message); }
   }
 
   private sees(n: Npc, px: number, py: number) {
@@ -103,15 +123,15 @@ export class Game {
         else await this.challenge(npc);
       } else if (npc.kind === "script") {
         const r = parseScript(npc.script ?? "");
-        if (r.ok) await runScript(r.code, this.scriptCtx(npc), this.e);
+        if (r.ok) { this.refreshBuiltins(); try { await runScript(r.code, this.scriptCtx(npc), this.e); } catch (err) { this.host.say((err as Error).message); } }
         else this.host.say(`Script de ${npc.name} con errores: ${r.errors[0]}`);
       } else await this.host.dialog(npc.name, npc.lines.length ? npc.lines : ["..."]);
     });
   }
 
-  private scriptCtx(npc: Npc): ScriptCtx {
+  private scriptCtx(npc: Npc | null, speaker = npc?.name ?? null): ScriptCtx {
     return {
-      say: (lines) => this.host.dialog(npc.name, lines),
+      say: (lines) => this.host.dialog(speaker, lines),
       give: (item, n) => { this.inv[item] = (this.inv[item] ?? 0) + n; sfx("heal"); this.host.say(`Recibes ${n} × ${this.p.items.find((i) => i.id === item)?.name ?? item}.`); },
       heal: () => { healAll(this.p, this.party); sfx("heal"); },
       battle: async (sp, lv) => { await this.fight([makeMon(this.p, sp, lv)]); },

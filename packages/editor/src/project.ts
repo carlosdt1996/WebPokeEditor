@@ -31,11 +31,14 @@ export interface Npc {
   script?: string;
 }
 export interface ItemDef { id: string; name: string; kind: "heal" | "ball"; /** heal: PS que cura. ball: bonus (+%) a la probabilidad de captura. */ amount: number }
+/** Disparador por casilla: ejecuta un script al pisarla. */
+export interface Trigger { x: number; y: number; name: string; script: string; once: boolean }
 export interface Warp { x: number; y: number; toMap: string; toX: number; toY: number }
 
 export interface GameMap {
   id: string; name: string; w: number; h: number; tiles: string;
   npcs: Npc[]; warps: Warp[];
+  triggers?: Trigger[];
   /** Capa de objetos (base64 u8, 0 = vacío): decoración sobre el suelo, con transparencia. */
   objects?: string;
   /** Altura por casilla para el modo 3D (base64 de Int8 + 128; unidades de 0,25 tiles). */
@@ -162,6 +165,7 @@ export function defaultProject(): Project {
           { id: "pescador", x: 14, y: 7, look: 3, dir: 0, kind: "talk", name: "Pescador", lines: ["El lago está tranquilo hoy...", "A veces pican criaturas muy raras."] },
           { id: "profesor", x: 9, y: 8, look: 2, dir: 3, kind: "script", name: "Profesor", lines: [], script: "if regalo\nsay Ya tienes mi regalo. ¡Cuídalos bien!\nelse\nsay ¡Hola! Toma, te vendrá bien esto.\ngive potion 3\ngive ball 5\nflag regalo\nsay Y recuerda: si te debilitas, la enfermera te curará.\nend" },
         ],
+        triggers: [{ x: 11, y: 12, name: "Cartel de bienvenida", once: false, script: "add visitas 1\nif visitas == 1\nsay (Un cartel) Bienvenido a Pueblo Inicial.\nelse\nsay (Un cartel) Has pasado por aquí {visitas} veces.\nend" }],
         encounters: ["pelusin"],
         encounterLevel: [2, 4],
       }),
@@ -247,6 +251,19 @@ export function validate(p: Project): string[] {
   if (mapIds.size !== p.maps.length) errs.push("Ids de mapa duplicados");
   if (speciesIds.size !== p.species.length) errs.push("Ids de especie duplicados");
   if (moveIds.size !== p.moves.length) errs.push("Ids de movimiento duplicados");
+  const checkScript = (src: string, where: string) => {
+    const r = parseScript(src);
+    if (!r.ok) { errs.push(...r.errors.map((e) => `${where}: ${e}`)); return; }
+    for (const i of r.code) {
+      if (i.op === "give" && !itemIds.has(i.item)) errs.push(`${where}: objeto inexistente "${i.item}"`);
+      if ((i.op === "battle" || i.op === "givemon") && !speciesIds.has(i.species)) errs.push(`${where}: especie inexistente "${i.species}"`);
+      if (i.op === "warp") {
+        const d = p.maps.find((k) => k.id === i.map);
+        if (!d) errs.push(`${where}: mapa inexistente "${i.map}"`);
+        else if (i.x >= d.w || i.y >= d.h) errs.push(`${where}: warp fuera del mapa`);
+      }
+    }
+  };
   const start = p.maps.find((m) => m.id === p.start.map);
   if (!start) errs.push(`El mapa inicial "${p.start.map}" no existe`);
   else if (p.start.x >= start.w || p.start.y >= start.h) errs.push("El punto de inicio está fuera del mapa");
@@ -259,17 +276,13 @@ export function validate(p: Project): string[] {
     for (const n of m.npcs) {
       if (n.x >= m.w || n.y >= m.h) errs.push(`${m.name}: NPC "${n.name}" fuera del mapa`);
       for (const t of n.team ?? []) if (!speciesIds.has(t.species)) errs.push(`${m.name}: "${n.name}" usa especie inexistente "${t.species}"`);
-      if (n.kind === "script") {
-        const r = parseScript(n.script ?? "");
-        if (!r.ok) errs.push(...r.errors.map((e) => `${m.name}: script de "${n.name}": ${e}`));
-        else for (const i of r.code) {
-          if (i.op === "give" && !itemIds.has(i.item)) errs.push(`${m.name}: script de "${n.name}": objeto inexistente "${i.item}"`);
-          if ((i.op === "battle" || i.op === "givemon") && !speciesIds.has(i.species)) errs.push(`${m.name}: script de "${n.name}": especie inexistente "${i.species}"`);
-          if (i.op === "warp") { const d = p.maps.find((k) => k.id === i.map); if (!d) errs.push(`${m.name}: script de "${n.name}": mapa inexistente "${i.map}"`); else if (i.x >= d.w || i.y >= d.h) errs.push(`${m.name}: script de "${n.name}": warp fuera del mapa`); }
-        }
-      }
+      if (n.kind === "script") checkScript(n.script ?? "", `${m.name}: script de "${n.name}"`);
       if (n.kind === "trainer" && !(n.team?.length)) errs.push(`${m.name}: el entrenador "${n.name}" no tiene equipo`);
       if (n.kind === "trainer" && n.double && (n.team?.length ?? 0) < 2) errs.push(`${m.name}: el entrenador "${n.name}" necesita 2+ criaturas para un combate doble`);
+    }
+    for (const t of m.triggers ?? []) {
+      if (t.x >= m.w || t.y >= m.h) errs.push(`${m.name}: disparador "${t.name}" fuera del mapa`);
+      checkScript(t.script, `${m.name}: disparador "${t.name}"`);
     }
     for (const w of m.warps) {
       const dest = p.maps.find((d) => d.id === w.toMap);

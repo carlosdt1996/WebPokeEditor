@@ -324,6 +324,7 @@ pub extern "C" fn engine_damage(level: u32, power: u32, atk: u32, def: u32, mult
 
 pub const VM_MAX_INSTR: usize = 1024;
 pub const VM_FLAGS: usize = 256;
+pub const VM_VARS: usize = 256;
 pub const VM_SAY: u32 = 1;
 pub const VM_GIVE: u32 = 2;
 pub const VM_HEAL: u32 = 3;
@@ -336,18 +337,25 @@ const OP_FLAG: u32 = 10;
 const OP_UNFLAG: u32 = 11;
 const OP_JIF: u32 = 12;
 const OP_JMP: u32 = 13;
+const OP_SET: u32 = 20;
+const OP_ADD: u32 = 21;
+/// CMP a=var b=comparador c=valor: guarda el resultado; JNC a=destino salta si fue falso.
+const OP_CMP: u32 = 22;
+const OP_JNC: u32 = 23;
 
 pub struct Vm {
     code: [u32; VM_MAX_INSTR * 4],
     len: usize,
     pc: usize,
     flags: [u8; VM_FLAGS],
+    vars: [i32; VM_VARS],
+    cmp: bool,
     args: [u32; 3],
 }
 
 impl Vm {
     pub const fn new() -> Self {
-        Vm { code: [0; VM_MAX_INSTR * 4], len: 0, pc: 0, flags: [0; VM_FLAGS], args: [0; 3] }
+        Vm { code: [0; VM_MAX_INSTR * 4], len: 0, pc: 0, flags: [0; VM_FLAGS], vars: [0; VM_VARS], cmp: false, args: [0; 3] }
     }
     pub fn load(&mut self, n_instr: usize) {
         self.len = n_instr.min(VM_MAX_INSTR);
@@ -380,6 +388,28 @@ impl Vm {
                     }
                 }
                 OP_JMP => self.pc = a as usize,
+                OP_SET => self.vars[(a as usize) % VM_VARS] = b as i32,
+                OP_ADD => {
+                    let v = &mut self.vars[(a as usize) % VM_VARS];
+                    *v = v.wrapping_add(b as i32);
+                }
+                OP_CMP => {
+                    let (x, y) = (self.vars[(a as usize) % VM_VARS], c as i32);
+                    self.cmp = match b {
+                        0 => x == y,
+                        1 => x != y,
+                        2 => x > y,
+                        3 => x < y,
+                        4 => x >= y,
+                        5 => x <= y,
+                        _ => return VM_ERR,
+                    };
+                }
+                OP_JNC => {
+                    if !self.cmp {
+                        self.pc = a as usize;
+                    }
+                }
                 _ => return VM_ERR,
             }
         }
@@ -425,6 +455,15 @@ pub extern "C" fn vm_flag_set(id: u32, on: u32) {
 #[no_mangle]
 pub extern "C" fn vm_flags_reset() {
     vm().flags = [0; VM_FLAGS];
+    vm().vars = [0; VM_VARS];
+}
+#[no_mangle]
+pub extern "C" fn vm_var_get(id: u32) -> i32 {
+    vm().vars[(id as usize) % VM_VARS]
+}
+#[no_mangle]
+pub extern "C" fn vm_var_set(id: u32, v: i32) {
+    vm().vars[(id as usize) % VM_VARS] = v;
 }
 
 #[cfg(test)]
@@ -557,6 +596,39 @@ mod tests {
         assert_eq!(v.run(), VM_HEAL);
         assert_eq!(v.run(), 0);
         v.code[0] = 99; // opcode inválido
+        v.load(1);
+        assert_eq!(v.run(), VM_ERR);
+    }
+
+    #[test]
+    fn vm_variables_and_loops() {
+        let mut v = Vm::new();
+        // x = 0; while x < 3 { say x; x += 1 }
+        let prog: [[u32; 4]; 7] = [
+            [OP_SET, 0, 0, 0],
+            [OP_CMP, 0, 3, 3], // 1: x < 3
+            [OP_JNC, 6, 0, 0], // 2: si no, sale
+            [VM_SAY, 1, 0, 0],
+            [OP_ADD, 0, 1, 0],
+            [OP_JMP, 1, 0, 0],
+            [VM_HEAL, 0, 0, 0],
+        ];
+        for (i, w) in prog.iter().enumerate() {
+            v.code[i * 4..i * 4 + 4].copy_from_slice(w);
+        }
+        v.load(7);
+        let mut says = 0;
+        loop {
+            match v.run() {
+                VM_SAY => says += 1,
+                VM_HEAL => break,
+                e => panic!("evento inesperado {e}"),
+            }
+        }
+        assert_eq!(says, 3);
+        assert_eq!(v.vars[0], 3);
+        // comparador inválido
+        v.code[0..4].copy_from_slice(&[OP_CMP, 0, 9, 0]);
         v.load(1);
         assert_eq!(v.run(), VM_ERR);
     }

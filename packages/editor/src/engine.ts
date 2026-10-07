@@ -29,6 +29,8 @@ interface Exports {
   vm_flag_get(id: number): number;
   vm_flag_set(id: number, on: number): void;
   vm_flags_reset(): void;
+  vm_var_get(id: number): number;
+  vm_var_set(id: number, v: number): void;
   engine_clear_blockers(): void;
   engine_set_blocker(x: number, y: number, v: number): void;
   engine_walkable(x: number, y: number): number;
@@ -72,7 +74,16 @@ export class Engine {
     if (id === undefined) { id = this.flagIds.size % 256; this.flagIds.set(name, id); }
     return id;
   }
-  flagsReset() { this.flagIds.clear(); this.x.vm_flags_reset(); }
+  private varIds = new Map<string, number>();
+  /** Id estable (0–255) de una variable numérica por nombre. */
+  varId(name: string): number {
+    let id = this.varIds.get(name);
+    if (id === undefined) { id = this.varIds.size % 256; this.varIds.set(name, id); }
+    return id;
+  }
+  getVar(name: string) { return this.x.vm_var_get(this.varId(name)); }
+  setVar(name: string, v: number) { this.x.vm_var_set(this.varId(name), v | 0); }
+  flagsReset() { this.flagIds.clear(); this.varIds.clear(); this.x.vm_flags_reset(); }
   hasFlag(name: string) { return this.x.vm_flag_get(this.flagId(name)) === 1; }
   setFlag(name: string, on: boolean) { this.x.vm_flag_set(this.flagId(name), on ? 1 : 0); }
   vmLoad(words: Uint32Array) {
