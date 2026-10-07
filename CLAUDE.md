@@ -21,3 +21,6 @@ Proyecto: editor de fangames de Pokémon en el navegador (Rust→WASM + WebGPU +
 ## No hacer
 - No añadir dependencias sin justificarlas en el PR.
 - No crear PRs sin que el usuario lo pida.
+
+## Forma de trabajar
+- Cuando el usuario pide algo, hazlo **hasta sus últimas consecuencias**: no te detengas a mitad ni interpretes que debes parar para preguntar. Termina la tarea completa (código, tests, docs, commit y push) y sigue con lo que quede pendiente de lo pedido.
