@@ -17,6 +17,7 @@ Creador de **fangames de Pokémon** que corre íntegramente en el navegador, usa
 - **Editor de datos**: especies, movimientos, **objetos e inventario**, equipo inicial, encuentros por mapa; **importar/exportar CSV** de especies y movimientos.
 - **Gráficos**: criaturas y arte originales generados por código. Puedes **importar tus propios sprites y tileset** (se quedan en tu navegador/proyecto; ver [aspectos legales](docs/guides/legal-and-assets.md)).
 - **Exportar juego**: un único `.html` autocontenido (motor WASM + datos + player) que se juega sin servidor.
+- **Responsive y táctil**: se juega con mando en pantalla y se edita con gestos (pintar, mover, pellizcar) desde el móvil.
 - **PWA**: instalable y funciona sin conexión tras la primera visita.
 - Audio sintetizado (SFX y música) con WebAudio.
 - Guardado automático en **OPFS** (con respaldo en localStorage) + **importar/exportar** proyecto (`.wpe.json`, esquema versionado con migraciones).
@@ -56,6 +57,7 @@ Una herramienta tipo "RPG Maker para Pokémon" sin instalación: editas mapas, P
 | [`docs/guides/tutorial-primer-juego.md`](docs/guides/tutorial-primer-juego.md) | Tutorial: tu primer juego |
 | [`docs/guides/tutorial-scripts.md`](docs/guides/tutorial-scripts.md) | Tutorial: scripts de eventos |
 | [`docs/guides/tutorial-datos-y-combate.md`](docs/guides/tutorial-datos-y-combate.md) | Tutorial: datos y combate |
+| [`docs/guides/movil.md`](docs/guides/movil.md) | Jugar y editar en el móvil |
 | [`docs/guides/packs.md`](docs/guides/packs.md) | Packs: compartir contenido |
 | [`docs/guides/accesibilidad-e-idiomas.md`](docs/guides/accesibilidad-e-idiomas.md) | Accesibilidad e idiomas |
 | [`docs/guides/exportar-escritorio.md`](docs/guides/exportar-escritorio.md) | Aplicación de escritorio (opcional) |

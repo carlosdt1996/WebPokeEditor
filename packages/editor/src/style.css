@@ -128,3 +128,80 @@ dialog.modal::backdrop { background: rgba(0,0,0,.6); }
 .hint, .muted, .status { color: #a3a9bf; }
 .reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation: none !important; transition: none !important; }
 @media (prefers-reduced-motion: reduce) { html:not(.motion-ok) *, html:not(.motion-ok) *::before, html:not(.motion-ok) *::after { animation: none !important; transition: none !important; } }
+
+/* ===== Móvil y pantallas táctiles ===== */
+html, body, #app { height: 100%; }
+@supports (height: 100dvh) { html, body, #app { height: 100dvh; } }
+body { overscroll-behavior: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
+.viewport, .battle { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+/* mando táctil: visible solo al jugar en pantallas táctiles o estrechas */
+.touchpad { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: none; justify-content: space-between; align-items: flex-end; padding: 0 max(14px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); pointer-events: none; }
+.touchpad[hidden] { display: none !important; }
+@media (pointer: coarse), (max-width: 900px) { .viewport.playing .touchpad { display: flex; } }
+.dpad { display: grid; grid-template: "u u u" 58px "l . r" 58px "d d d" 58px / 58px 58px 58px; pointer-events: none; }
+.dpad .up { grid-area: u; justify-self: center; width: 58px; } .dpad .down { grid-area: d; justify-self: center; width: 58px; }
+.dpad .left { grid-area: l; } .dpad .right { grid-area: r; }
+.abtns { display: flex; gap: 10px; align-items: flex-end; pointer-events: none; }
+.pad-btn { pointer-events: auto; touch-action: none; width: 58px; height: 58px; padding: 0; border-radius: 50%; font-size: 22px; background: rgba(20,22,32,.62); border: 2px solid rgba(255,255,255,.35); color: #fff; backdrop-filter: blur(2px); }
+.pad-btn.down, .pad-btn:active { background: rgba(229,57,53,.75); border-color: #fff; }
+.pad-btn.act { width: 76px; height: 76px; font-size: 28px; font-weight: 700; background: rgba(229,57,53,.6); }
+.pad-btn.rotl, .pad-btn.rotr { display: none; width: 46px; height: 46px; font-size: 20px; }
+.viewport.is3d .pad-btn.rotl, .viewport.is3d .pad-btn.rotr { display: block; }
+.dialog { z-index: 4; }
+.choice { z-index: 6; }
+@media (pointer: coarse), (max-width: 900px) {
+  .viewport.playing .dialog { bottom: auto; top: 3%; font-size: 16px; padding: 10px 14px; }
+  .viewport.playing .choice { bottom: auto; top: 28%; right: 3%; }
+  .toast { max-width: 92%; text-align: center; }
+}
+
+@media (max-width: 900px) {
+  :root { font-size: 15px; }
+  .top { flex-wrap: wrap; gap: 6px; padding: 6px 8px; padding-top: max(6px, env(safe-area-inset-top)); }
+  .top .brand { display: none; }
+  .top .status { display: none; }
+  .top .grow { display: none; }
+  .top .title { flex: 1 1 140px; width: auto; min-width: 100px; }
+  .top button, .top select { padding: 6px 9px; }
+  .tabs { overflow-x: auto; padding: 4px 8px 0; scrollbar-width: none; }
+  .tabs button { white-space: nowrap; }
+  footer { font-size: 11px; padding: 4px 8px; padding-bottom: max(4px, env(safe-area-inset-bottom)); }
+  footer span { display: none; } footer b { margin-left: 6px; }
+  .maptab { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; height: 100%; }
+  .maptab .stage { order: 1; flex: none; height: 56dvh; min-height: 280px; padding: 6px; }
+  .maptab .side { order: 2; border-right: none; border-top: 1px solid var(--line); overflow: visible; }
+  .maptab .log-panel { order: 3; border-left: none; border-top: 1px solid var(--line); overflow: visible; }
+  .maptab.playing .side, .maptab.playing .log-panel { display: none; }
+  .maptab.playing .stage { height: 100%; min-height: 0; padding: 0; }
+  .maptab.playing .viewport { border-radius: 0; border: none; }
+  .tools, .palette { grid-template-columns: repeat(3, 1fr); }
+  .panel { padding: 10px 12px; max-width: none; }
+  .form { grid-template-columns: 1fr 1fr; }
+  .result { max-width: none; }
+  dialog.modal { max-width: 92vw; }
+  #app.player .top .muted { display: none; }
+  .battle .plate { min-width: 150px; font-size: 12px; padding: 4px 8px; }
+  .battle .mon { min-width: 80px; }
+  .msg { font-size: 15px; padding: 8px 12px; } .menu button { font-size: 14px; padding: 10px 6px; }
+}
+@media (pointer: coarse) {
+  button, select, input[type=text], input[type=number] { min-height: 40px; }
+  input.n { width: 72px; }
+  input[type=checkbox] { width: 22px; height: 22px; }
+  .tools button, .swatch { min-height: 44px; }
+  .choice button { padding: 10px 12px; font-size: 17px; }
+  td, th { padding: 5px 6px; }
+}
+/* móvil apaisado: poca altura, el juego ocupa casi todo */
+@media (max-height: 520px) and (pointer: coarse) {
+  .top { padding-top: 2px; padding-bottom: 2px; }
+  .maptab .stage { height: 82dvh; min-height: 220px; }
+  .pad-btn { width: 50px; height: 50px; } .pad-btn.act { width: 64px; height: 64px; }
+  .dpad { grid-template: "u u u" 50px "l . r" 50px "d d d" 50px / 50px 50px 50px; } .dpad .up, .dpad .down { width: 50px; }
+  .viewport.playing .dialog { font-size: 14px; padding: 6px 12px; }
+}
+
+/* la rejilla principal nunca crece más que la pantalla: las tablas anchas hacen scroll dentro de su panel */
+#app { grid-template-columns: minmax(0, 1fr); }
+main { min-width: 0; overflow: hidden; }

@@ -83,7 +83,7 @@ async function main() {
   const toolBtns = new Map<Tool, HTMLElement>();
   const setTool = (t: Tool) => { view.tool = t; toolBtns.forEach((b, k) => b.classList.toggle("sel", k === t)); };
   const tools = h("div", { class: "tools" });
-  for (const [t, label, key] of [["paint", "✏️ Pintar", "B"], ["fill", "🪣 Rellenar", "G"], ["pick", "💧 Cuentagotas", "I"], ["spawn", "📍 Inicio", "P"], ["npc", "🧑 NPC", "N"], ["warp", "🚪 Salto", "J"], ["trigger", "⚡ Disparador", "T"], ["raise", "⛰ Elevar", "U"], ["lower", "🕳 Bajar", "H"]] as [Tool, string, string][]) {
+  for (const [t, label, key] of [["pan", "✋ Mover", "M"], ["paint", "✏️ Pintar", "B"], ["fill", "🪣 Rellenar", "G"], ["pick", "💧 Cuentagotas", "I"], ["spawn", "📍 Inicio", "P"], ["npc", "🧑 NPC", "N"], ["warp", "🚪 Salto", "J"], ["trigger", "⚡ Disparador", "T"], ["raise", "⛰ Elevar", "U"], ["lower", "🕳 Bajar", "H"]] as [Tool, string, string][]) {
     const b = h("button", { title: `${label} (${key})`, onclick: () => setTool(t) }, label);
     toolBtns.set(t, b); tools.append(b);
   }
@@ -248,6 +248,7 @@ async function main() {
     h("p", { class: "hint" }, tr("Rueda: zoom · Clic derecho / Espacio+arrastrar: mover · Ctrl+Z / Ctrl+Y: deshacer/rehacer · Supr: borrar selección")),
   );
   const togglePlay = () => {
+    mapTab.classList.toggle("playing", !view.playing);
     if (view.playing) { view.stopPlay(); playBtn.textContent = tr("▶ Probar"); side.classList.remove("disabled"); sync(); }
     else { view.startPlay(); playBtn.textContent = tr("■ Detener"); side.classList.add("disabled"); }
   };

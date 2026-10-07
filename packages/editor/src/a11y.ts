@@ -71,21 +71,30 @@ function nameIt(el: Element) {
   el.setAttribute("aria-label", t || "control");
 }
 
-/** Observa la interfaz y mantiene nombres accesibles y roles al día; se llama una vez al arrancar. */
+/** Aplica nombres y roles a un subárbol recién añadido (coste proporcional al subárbol, no a toda la interfaz). */
+function enhanceNode(n: Element) {
+  const each = (sel: string, f: (e: Element) => void) => { if (n.matches(sel)) f(n); n.querySelectorAll(sel).forEach(f); };
+  each(NEEDS_NAME, nameIt);
+  each("nav.tabs", (nav) => { nav.setAttribute("role", "tablist"); nav.querySelectorAll("button").forEach(syncTab); });
+  each(".dialog, .msg", (d) => { if (!d.hasAttribute("aria-live")) d.setAttribute("aria-live", "polite"); });
+  each(".dialog", (d) => { if (!d.hasAttribute("role")) d.setAttribute("role", "dialog"); });
+  each("canvas", (c) => { if (!c.hasAttribute("role")) { c.setAttribute("role", "img"); c.setAttribute("aria-label", c.classList.contains("overlay") ? "Capa de edición del mapa" : "Mapa del juego"); } });
+}
+function syncTab(b: Element) { b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(b.classList.contains("sel"))); }
+
+/** Observa la interfaz y mantiene nombres accesibles y roles al día; se llama una vez al arrancar. Solo procesa lo que cambia. */
 export function enhanceA11y(root: HTMLElement) {
   applyMotion();
-  const pass = () => {
-    root.querySelectorAll(NEEDS_NAME).forEach(nameIt);
-    root.querySelectorAll("nav.tabs").forEach((nav) => {
-      nav.setAttribute("role", "tablist");
-      nav.querySelectorAll("button").forEach((b) => { b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(b.classList.contains("sel"))); });
-    });
-    root.querySelectorAll(".dialog, .msg").forEach((d) => { if (!d.hasAttribute("aria-live")) d.setAttribute("aria-live", "polite"); });
-    root.querySelectorAll(".dialog").forEach((d) => { if (!d.hasAttribute("role")) d.setAttribute("role", "dialog"); });
-    root.querySelectorAll("canvas").forEach((c) => { if (!c.hasAttribute("role")) { c.setAttribute("role", "img"); c.setAttribute("aria-label", c.classList.contains("overlay") ? "Capa de edición del mapa" : "Mapa del juego"); } });
-  };
+  enhanceNode(root);
+  let pending: Element[] = [];
   let queued = false;
-  new MutationObserver(() => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; pass(); }); })
-    .observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "hidden"] });
-  pass();
+  new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.type === "attributes") { if (r.target instanceof Element && r.target.parentElement?.matches("nav.tabs")) syncTab(r.target); continue; }
+      r.addedNodes.forEach((n) => { if (n instanceof Element) pending.push(n); });
+    }
+    if (queued || !pending.length) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; const list = pending; pending = []; for (const n of list) if (n.isConnected) enhanceNode(n); });
+  }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
 }

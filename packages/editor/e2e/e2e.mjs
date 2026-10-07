@@ -49,7 +49,9 @@ const key = (p, k, ms = 60) => p.keyboard.down(k).then(() => p.waitForTimeout(ms
 /** Mantiene una tecla pulsada hasta que `cond` (evaluada en la página) sea cierta. */
 async function holdUntil(p, k, cond, timeout = 8000) {
   await p.keyboard.down(k);
-  try { await p.waitForFunction(cond, null, { timeout, polling: 30 }); } finally { await p.keyboard.up(k); }
+  try { await p.waitForFunction(cond, null, { timeout, polling: 30 }); }
+  catch (e) { const st = await p.evaluate(() => { const w = window.__wpe; return JSON.stringify({ cell: w?.engine.cell, map: w?.view.game?.map.id, busy: w?.view.game?.busy, dialog: !document.querySelector(".dialog")?.hidden, choice: !!document.querySelector(".choice"), battle: !!document.querySelector(".battle") }); }).catch(() => "?"); throw new Error(`holdUntil(${k}) agotó el tiempo; estado ${st}`); }
+  finally { await p.keyboard.up(k); }
   await p.waitForTimeout(250);
 }
 /** Mantiene la tecla hasta que el jugador mira en la dirección `dir` (0 abajo, 1 arriba, 2 izq, 3 der). */
@@ -185,6 +187,8 @@ await test("gestión de mapas: nuevo, renombrar y eliminar", async () => {
 
 await test("recorrer el mundo: puerta → casa → salida → ruta", async () => {
   await page.click("text=▶ Probar");
+  await page.waitForFunction(() => window.__wpe.view.game && !window.__wpe.view.game.busy);
+  await page.waitForTimeout(300);
   await holdUntil(page, "ArrowDown", cell(11, 9));
   await holdUntil(page, "ArrowLeft", cell(5, 9));
   await holdUntil(page, "ArrowUp", `(${mapId}) === "casa"`);
@@ -601,7 +605,7 @@ await test("importar sprite de especie y atlas propio (válido e inválido)", as
   page.removeAllListeners("dialog"); page.on("dialog", (d) => { alerted = d.message(); d.accept(); });
   const bad = await png(page, 50, 50);
   await page.locator("input[type=file][accept='image/png']").setInputFiles({ name: "malo.png", mimeType: "image/png", buffer: Buffer.from(bad, "base64") });
-  await page.waitForTimeout(500);
+  for (let i = 0; i < 40 && !alerted; i++) await page.waitForTimeout(100);
   assert(alerted.includes("128×80"), "aviso de tamaño incorrecto: " + alerted);
   assert(await W(page, () => window.__wpe.project.atlas === undefined), "atlas inválido no debe guardarse");
   const good = await png(page, 128, 80);
@@ -807,6 +811,130 @@ await test("accesibilidad: nombres accesibles, roles, regiones en vivo y movimie
   assert(await page.evaluate(() => document.documentElement.classList.contains("reduce-motion")), "clase reduce-motion activa");
   await page.locator("footer label:has-text('Movimiento reducido') input").uncheck();
   assert(!(await page.evaluate(() => document.documentElement.classList.contains("reduce-motion"))), "clase reduce-motion quitada");
+});
+
+// ---------- móvil ----------
+const mobileCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, acceptDownloads: true });
+const mp = await newPage(URL_, mobileCtx);
+mp.on("dialog", (d) => d.accept());
+const overflowX = (p) => p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+
+await test("móvil: la interfaz cabe en pantalla estrecha (sin desbordes horizontales) en las tres pestañas", async () => {
+  for (const tab of ["Mapa", "Datos", "Calculadora"]) {
+    await mp.tap(`nav.tabs button:has-text('${tab}')`);
+    await mp.waitForTimeout(250);
+    const over = await overflowX(mp);
+    assert(over <= 1, `desborde horizontal de ${over}px en la pestaña ${tab}`);
+  }
+  await mp.tap("nav.tabs button:has-text('Mapa')");
+  const box = await mp.locator(".stage").boundingBox();
+  assert(box.width >= 340 && box.height >= 280, `el mapa debe verse grande: ${JSON.stringify(box)}`);
+  const hidden = await mp.evaluate(() => [...document.querySelectorAll("header button, header select")].filter((b) => { const r = b.getBoundingClientRect(); return r.right > window.innerWidth + 1 || r.left < -1; }).map((b) => b.textContent));
+  eq(hidden, [], "botones de la barra superior fuera de pantalla");
+  await shot(mp, "20-movil-editor");
+});
+
+await test("móvil: pintar con un toque y mover/zoom del mapa con dos dedos", async () => {
+  const before = await mp.evaluate(() => window.__wpe.engine.tiles.reduce((a, v, i) => (a + v * (i % 97 + 1)) | 0, 0));
+  await mp.tap(".tools button:has-text('Pintar')");
+  const rect = async () => { await mp.locator(".stage").scrollIntoViewIfNeeded(); await mp.evaluate(() => document.querySelector(".maptab").scrollTo(0, 0)); await mp.waitForTimeout(100); return mp.locator("canvas.overlay").boundingBox(); };
+  let r = await rect();
+  let after = before;
+  for (const sw of [3, 4, 5, 6]) { // alguna de estas losetas difiere de la que hay bajo el dedo
+    await mp.tap(`.palette .swatch >> nth=${sw}`);
+    r = await rect();
+    await mp.touchscreen.tap(r.x + r.width / 2, r.y + r.height / 2);
+    await mp.waitForTimeout(150);
+    after = await mp.evaluate(() => window.__wpe.engine.tiles.reduce((a, v, i) => (a + v * (i % 97 + 1)) | 0, 0));
+    if (after !== before) break;
+  }
+  assert(before !== after, "un toque debe pintar una casilla");
+  // pellizco con dos dedos (CDP): el zoom cambia y no se pinta nada más
+  r = await rect();
+  const z0 = await mp.evaluate(() => window.__wpe.view.cam.zoom);
+  const cdp = await mobileCtx.newCDPSession(mp);
+  let cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: cx - 30, y: cy, id: 1 }, { x: cx + 30, y: cy, id: 2 }] });
+  for (let i = 1; i <= 6; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: cx - 30 - i * 12, y: cy, id: 1 }, { x: cx + 30 + i * 12, y: cy, id: 2 }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await mp.waitForTimeout(150);
+  const z1 = await mp.evaluate(() => window.__wpe.view.cam.zoom);
+  assert(z1 > z0 * 1.3, `el pellizco debe ampliar: ${z0} → ${z1}`);
+  const after2 = await mp.evaluate(() => window.__wpe.engine.tiles.reduce((a, v, i) => (a + v * (i % 97 + 1)) | 0, 0));
+  eq(after2, after, "el gesto de dos dedos no debe pintar");
+  // herramienta «Mover»: un dedo arrastra el mapa
+  await mp.tap(".tools button:has-text('Mover')");
+  r = await rect(); cx = r.x + r.width / 2; cy = r.y + r.height / 2;
+  const x0 = await mp.evaluate(() => window.__wpe.view.cam.x);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: cx, y: cy, id: 1 }] });
+  for (let i = 1; i <= 5; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: cx - i * 15, y: cy, id: 1 }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await mp.waitForTimeout(100);
+  assert(Math.abs((await mp.evaluate(() => window.__wpe.view.cam.x)) - x0) > 5, "la herramienta Mover debe desplazar el mapa");
+  await mp.tap(".tools button:has-text('Pintar')");
+  await mp.evaluate(() => window.__wpe.view.fit());
+});
+
+await test("móvil: jugar con el mando táctil (cruceta, A y giro de cámara 3D)", async () => {
+  await mp.tap("text=▶ Probar");
+  await mp.waitForSelector(".viewport.playing .touchpad", { state: "visible" });
+  assert(!(await mp.locator(".side").isVisible()), "al jugar se oculta el panel lateral para dar espacio al juego");
+  const hold = async (sel, ms) => {
+    await mp.locator(sel).dispatchEvent("pointerdown", { pointerId: 7, pointerType: "touch" });
+    await mp.waitForTimeout(ms);
+    await mp.locator(sel).dispatchEvent("pointerup", { pointerId: 7, pointerType: "touch" });
+    await mp.waitForTimeout(150);
+  };
+  const start = await mp.evaluate(() => ({ ...window.__wpe.engine.cell }));
+  await hold(".pad-btn.down", 300); // poco: más abajo hay un disparador con diálogo
+  await mp.waitForTimeout(400);
+  const mid = await mp.evaluate(() => ({ ...window.__wpe.engine.cell }));
+  assert(mid.y > start.y, `la cruceta debe mover al jugador: ${JSON.stringify(start)} → ${JSON.stringify(mid)}`);
+  await hold(".pad-btn.up", 600);
+  await mp.waitForTimeout(300);
+  assert((await mp.evaluate(() => window.__wpe.engine.cell.y)) < mid.y, "la flecha arriba debe volver a subir");
+  // sin teclas atascadas tras soltar
+  assert(await mp.evaluate(() => window.__wpe.view.keys.size === 0), "al soltar no quedan teclas pulsadas");
+  // A abre/avanza diálogos: mira a un NPC y pulsa A
+  await mp.evaluate(() => { void window.__wpe.view.game.warpTo("pueblo", 8, 8); });
+  await mp.waitForTimeout(300);
+  await hold(".pad-btn.right", 300);
+  await hold(".pad-btn.act", 100);
+  await mp.waitForSelector(".dialog:not([hidden])", { timeout: 4000 });
+  await mp.tap(".dialog"); // tocar el cuadro también avanza
+  for (let i = 0; i < 10 && (await mp.locator(".dialog:not([hidden])").count()); i++) { await mp.tap(".dialog"); await mp.waitForTimeout(150); }
+  assert(await mp.locator(".dialog[hidden]").count() === 1, "el diálogo se cierra tocando");
+  // 3D: aparecen los botones de giro
+  await mp.tap("text=🧊 3D");
+  await mp.waitForSelector(".viewport.is3d", { timeout: 15000 });
+  assert(await mp.locator(".pad-btn.rotl").isVisible(), "botones de girar cámara en 3D");
+  const yaw0 = await mp.evaluate(() => window.__wpe.view.cam3.yaw);
+  await hold(".pad-btn.rotr", 400);
+  assert(Math.abs((await mp.evaluate(() => window.__wpe.view.cam3.yaw)) - yaw0) > 0.1, "el botón gira la cámara");
+  await shot(mp, "21-movil-jugando-3d");
+  await mp.tap("text=🧊 3D");
+  await mp.tap("text=■ Detener");
+  await mp.waitForSelector(".side", { state: "visible" });
+});
+
+await test("móvil: combate usable con toques (el menú cabe y se gana tocando)", async () => {
+  await mp.tap("text=▶ Probar");
+  await mp.waitForTimeout(200);
+  await mp.evaluate(() => { const g = window.__wpe.view.game; g.party[0].level = 40; void g.fight([{ species: "pelusin", level: 2, hp: 1, exp: 8, moves: ["embestida"] }]); });
+  await mp.waitForSelector(".battle");
+  await mp.waitForSelector(".menu button:has-text('Luchar')", { timeout: 8000 });
+  const inside = await mp.evaluate(() => [...document.querySelectorAll(".battle .menu button, .battle .plate")].every((b) => { const r = b.getBoundingClientRect(); return r.left >= -1 && r.right <= window.innerWidth + 1; }));
+  assert(inside, "el menú y las placas de combate deben caber en el ancho");
+  assert((await overflowX(mp)) <= 1, "sin desborde horizontal durante el combate");
+  await shot(mp, "22-movil-combate");
+  for (let i = 0; i < 30 && (await mp.locator(".battle").count()); i++) {
+    const fight = mp.locator(".menu button:has-text('Luchar')");
+    if (await fight.count()) { await fight.tap(); await mp.locator(".menu button").first().tap(); }
+    await mp.waitForTimeout(300);
+    await mp.locator(".battle").tap({ position: { x: 20, y: 20 } }).catch(() => {});
+  }
+  assert(!(await mp.locator(".battle").count()), "el combate no terminó con toques");
+  await mp.tap("text=■ Detener");
 });
 
 await test("idioma: cambiar a inglés traduce la interfaz y volver a español la restaura", async () => {

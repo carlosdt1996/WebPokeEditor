@@ -11,7 +11,7 @@ import { reducedMotion } from "./a11y";
 import { ANIM_MS, ERASE_OBJECT, NPC_SPRITE, OBJECT_MIN, PLAYER_SPRITE, TILE, TILE_ANIM, TILE_DEFS, TILE_HEIGHT, atlasIndex } from "./tiles";
 import { runBattleUi } from "./ui/battleUi";
 
-export type Tool = "paint" | "fill" | "pick" | "spawn" | "npc" | "warp" | "trigger" | "raise" | "lower";
+export type Tool = "pan" | "paint" | "fill" | "pick" | "spawn" | "npc" | "warp" | "trigger" | "raise" | "lower";
 export type Selection = { kind: "npc" | "warp" | "trigger"; index: number } | null;
 
 /** layer: 0 suelo, 1 objetos, 2 alturas */
@@ -62,6 +62,9 @@ export class MapView {
   private acc = 0;
   private last = 0;
   private advance: (() => void) | null = null;
+  private pad?: HTMLElement;
+  private pointers = new Map<number, { x: number; y: number }>();
+  private gesture: { dist: number; mx: number; my: number } | null = null;
   private choiceKeys: ((code: string) => void) | null = null;
   private project!: Project;
   private editIndex = 0;
@@ -77,6 +80,7 @@ export class MapView {
     this.rendererKind = renderer.kind;
     this.setAtlas(atlas);
     this.el.append(this.overlay, this.dialogEl);
+    this.buildPad();
     this.setProject(project);
     this.bind();
     new ResizeObserver(() => this.onResize()).observe(this.el);
@@ -201,6 +205,7 @@ export class MapView {
       }
     }
     this.mode3d = on;
+    this.el.classList.toggle("is3d", on);
     this.world3dDirty = true;
     this.gl.style.display = on ? "none" : "";
     if (this.gl3d) this.gl3d.style.display = on ? "" : "none";
@@ -216,6 +221,8 @@ export class MapView {
     this.commit();
     this.editIndex = this.curIndex;
     this.playing = true;
+    this.el.classList.add("playing");
+    if (this.pad) this.pad.hidden = false;
     this.acc = 0;
     const host: Host = {
       loadMap: (i, x, y) => { this.loadIntoEngine(i, true, x, y); this.select(null); },
@@ -235,6 +242,9 @@ export class MapView {
   stopPlay() {
     if (!this.playing) return;
     this.playing = false;
+    this.el.classList.remove("playing");
+    if (this.pad) this.pad.hidden = true;
+    this.keys.clear();
     this.game = null;
     this.advance = null;
     this.dialogEl.hidden = true;
@@ -380,8 +390,10 @@ export class MapView {
     el.addEventListener("pointerdown", (e) => {
       if (this.playing) return;
       el.setPointerCapture(e.pointerId);
+      this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.pointers.size >= 2) { this.startGesture(); return; } // dos dedos: mover y hacer zoom (no pintar)
       if (this.mode3d) { this.orbit = { x: e.clientX, y: e.clientY, yaw: this.cam3.yaw, pitch: this.cam3.pitch }; return; }
-      if (e.button === 1 || e.button === 2 || this.spaceDown) {
+      if (e.button === 1 || e.button === 2 || this.spaceDown || this.tool === "pan") {
         this.pan = { x: e.clientX, y: e.clientY, cx: this.cam.x, cy: this.cam.y };
         return;
       }
@@ -391,6 +403,8 @@ export class MapView {
       this.act(e, true);
     });
     el.addEventListener("pointermove", (e) => {
+      if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.gesture && this.pointers.size >= 2) { this.updateGesture(); return; }
       if (this.orbit) {
         this.cam3.yaw = this.orbit.yaw - (e.clientX - this.orbit.x) * 0.008;
         this.cam3.pitch = Math.min(1.45, Math.max(0.3, this.orbit.pitch + (e.clientY - this.orbit.y) * 0.006));
@@ -402,7 +416,9 @@ export class MapView {
         this.cam.y = this.pan.cy - (e.clientY - this.pan.y) / this.cam.zoom;
       } else if (this.stroke) this.act(e, false);
     });
-    const end = () => {
+    const end = (e?: PointerEvent) => {
+      if (e) this.pointers.delete(e.pointerId);
+      if (this.gesture) { if (this.pointers.size < 2) this.gesture = null; this.pan = null; this.orbit = null; return; }
       this.pan = null; this.orbit = null;
       if (this.stroke) {
         if (this.stroke.size) { this.undo.push([...this.stroke.values()]); this.redo = []; this.onEdit(); }
@@ -429,20 +445,77 @@ export class MapView {
     const typing = (e: KeyboardEvent) => ["INPUT", "SELECT", "TEXTAREA"].includes((e.target as HTMLElement).tagName);
     window.addEventListener("keydown", (e) => {
       if (typing(e)) return;
-      if (e.code === "Space") this.spaceDown = true;
-      if (this.playing) {
-        if (e.code.startsWith("Arrow") || e.code === "Space" || e.code === "Enter") e.preventDefault();
-        if (this.choiceKeys) { if (!e.repeat) this.choiceKeys(e.code); this.keys.add(e.code); return; }
-        if (!e.repeat && (e.code === "Enter" || e.code === "Space" || e.code === "KeyZ")) {
-          if (this.advance) this.advance(); else this.game?.interact();
-        }
-      } else if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") { e.preventDefault(); e.shiftKey ? this.redoEdit() : this.undoEdit(); }
-      else if ((e.ctrlKey || e.metaKey) && e.code === "KeyY") { e.preventDefault(); this.redoEdit(); }
-      else if ((e.code === "Delete" || e.code === "Backspace") && this.selection) this.deleteSelection();
-      this.keys.add(e.code);
+      if (this.press(e.code, e.repeat, e.ctrlKey || e.metaKey, e.shiftKey)) e.preventDefault();
     });
-    window.addEventListener("keyup", (e) => { if (e.code === "Space") this.spaceDown = false; this.keys.delete(e.code); });
+    window.addEventListener("keyup", (e) => this.release(e.code));
     window.addEventListener("blur", () => this.keys.clear());
+  }
+
+  /** Pulsación de una tecla (física o del mando táctil). Devuelve true si hay que impedir el comportamiento por defecto. */
+  private press(code: string, repeat: boolean, ctrl = false, shift = false): boolean {
+    let prevent = false;
+    if (code === "Space") this.spaceDown = true;
+    if (this.playing) {
+      if (code.startsWith("Arrow") || code === "Space" || code === "Enter") prevent = true;
+      if (this.choiceKeys) { if (!repeat) this.choiceKeys(code); this.keys.add(code); return prevent; }
+      if (!repeat && (code === "Enter" || code === "Space" || code === "KeyZ")) {
+        if (this.advance) this.advance(); else this.game?.interact();
+      }
+    } else if (ctrl && code === "KeyZ") { prevent = true; shift ? this.redoEdit() : this.undoEdit(); }
+    else if (ctrl && code === "KeyY") { prevent = true; this.redoEdit(); }
+    else if ((code === "Delete" || code === "Backspace") && this.selection) this.deleteSelection();
+    this.keys.add(code);
+    return prevent;
+  }
+  private release(code: string) { if (code === "Space") this.spaceDown = false; this.keys.delete(code); }
+
+  /** Mando táctil (cruceta + A + giro de cámara 3D): solo se muestra en pantallas táctiles/estrechas mientras se juega. */
+  private buildPad() {
+    const btn = (label: string, code: string, cls: string, aria: string) => {
+      const b = h("button", { class: `pad-btn ${cls}`, "aria-label": aria, type: "button" }, label);
+      const down = (e: Event) => { e.preventDefault(); try { b.setPointerCapture?.((e as PointerEvent).pointerId); } catch { /* puntero sintético o ya liberado */ } b.classList.add("down"); this.press(code, false); };
+      const up = (e: Event) => { e.preventDefault(); b.classList.remove("down"); this.release(code); };
+      b.addEventListener("pointerdown", down);
+      for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) b.addEventListener(ev, up);
+      b.addEventListener("contextmenu", (e) => e.preventDefault());
+      return b;
+    };
+    const pad = h("div", { class: "touchpad", hidden: true },
+      h("div", { class: "dpad" }, btn("▲", "ArrowUp", "up", "Arriba"), btn("◀", "ArrowLeft", "left", "Izquierda"), btn("▶", "ArrowRight", "right", "Derecha"), btn("▼", "ArrowDown", "down", "Abajo")),
+      h("div", { class: "abtns" }, btn("↺", "KeyQ", "rotl", "Girar cámara a la izquierda"), btn("A", "Enter", "act", "Interactuar"), btn("↻", "KeyE", "rotr", "Girar cámara a la derecha")));
+    this.pad = pad;
+    this.el.append(pad);
+  }
+
+  /** Gesto de dos dedos: pellizcar para hacer zoom y arrastrar para mover (2D) o acercar (3D). */
+  private startGesture() {
+    // un trazo a medias se cierra tal cual (deshacible) antes de empezar el gesto
+    if (this.stroke) {
+      // el primer dedo ya pudo pintar una casilla: se deshace para que el gesto no deje marcas
+      if (this.stroke.size) { this.undo.push([...this.stroke.values()]); this.undoEdit(); this.redo = []; }
+      this.stroke = null;
+    }
+    this.pan = null; this.orbit = null;
+    const [a, b] = [...this.pointers.values()];
+    this.gesture = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  }
+  private updateGesture() {
+    const g = this.gesture;
+    const [a, b] = [...this.pointers.values()];
+    if (!g || !a || !b) return;
+    const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const k = dist / g.dist;
+    if (this.mode3d) this.cam3.dist = Math.min(60, Math.max(3, this.cam3.dist / k));
+    else {
+      const r = this.el.getBoundingClientRect();
+      const px = mx - r.left, py = my - r.top;
+      const wx = this.cam.x + px / this.cam.zoom, wy = this.cam.y + py / this.cam.zoom;
+      this.cam.zoom = Math.min(10, Math.max(0.5, this.cam.zoom * k));
+      // el punto bajo los dedos se queda bajo los dedos, y el desplazamiento del centro mueve el mapa
+      this.cam.x = wx - px / this.cam.zoom - (mx - g.mx) / this.cam.zoom;
+      this.cam.y = wy - py / this.cam.zoom - (my - g.my) / this.cam.zoom;
+    }
+    this.gesture = { dist, mx, my };
   }
 
   private onResize() {
