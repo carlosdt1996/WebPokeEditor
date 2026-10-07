@@ -1,6 +1,8 @@
 import "./style.css";
 import { audioStats, isMuted, setMuted } from "./audio";
 import { h } from "./dom";
+import { LANGS, type Lang, getLang, setLang, t as tr } from "./i18n";
+import { enhanceA11y, reducedMotion, setReducedMotion } from "./a11y";
 import { Engine } from "./engine";
 import { MapView, type Selection, type Tool } from "./mapView";
 import { SCRIPT_HELP, parseScript } from "./script";
@@ -225,43 +227,43 @@ async function main() {
   };
 
   // ---------- Barra superior y modos ----------
-  const playBtn = h("button", { class: "primary" }, "▶ Probar");
-  const btn3d = h("button", { title: "Vista 3D estilo DS (requiere WebGPU). Q/E giran la cámara; arrastra para orbitar." }, "🧊 3D");
+  const playBtn = h("button", { class: "primary" }, tr("▶ Probar"));
+  const btn3d = h("button", { title: tr("Vista 3D estilo DS (requiere WebGPU). Q/E giran la cámara; arrastra para orbitar.") }, tr("🧊 3D"));
   const side = h("aside", { class: "side" },
-    h("h3", {}, "Herramientas"), tools,
-    h("h3", {}, "Tiles"), palette,
-    h("h3", {}, "Vista"),
-    check("Cuadrícula", true, (v) => (view.showGrid = v)),
-    check("Mostrar colisiones", false, (v) => (view.showSolid = v)),
-    check("Mostrar alturas (3D)", false, (v) => (view.showHeights = v)),
-    h("button", { onclick: () => view.fit() }, "Centrar mapa"),
-    h("h3", {}, "Mapas"),
+    h("h3", {}, tr("Herramientas")), tools,
+    h("h3", {}, tr("Tiles")), palette,
+    h("h3", {}, tr("Vista")),
+    check(tr("Cuadrícula"), true, (v) => (view.showGrid = v)),
+    check(tr("Mostrar colisiones"), false, (v) => (view.showSolid = v)),
+    check(tr("Mostrar alturas (3D)"), false, (v) => (view.showHeights = v)),
+    h("button", { onclick: () => view.fit() }, tr("Centrar mapa")),
+    h("h3", {}, tr("Mapas")),
     h("div", { class: "row" }, mapSelect),
-    h("div", { class: "row" }, h("button", { onclick: newMap }, "+ Nuevo"), h("button", { onclick: renameMap }, "Renombrar"), h("button", { class: "danger", onclick: deleteMap }, "Eliminar")),
+    h("div", { class: "row" }, h("button", { onclick: newMap }, tr("+ Nuevo")), h("button", { onclick: renameMap }, tr("Renombrar")), h("button", { class: "danger", onclick: deleteMap }, tr("Eliminar"))),
     sizeBox, sizeInfo,
-    h("h3", {}, "Clima en combate"), weatherSel,
-    h("h3", {}, "Al entrar al mapa"), enterBox,
-    h("h3", {}, "Al salir del mapa"), exitBox,
-    h("h3", {}, "Inspector"), inspector,
-    h("p", { class: "hint" }, "Rueda: zoom · Clic derecho / Espacio+arrastrar: mover · Ctrl+Z / Ctrl+Y: deshacer/rehacer · Supr: borrar selección"),
+    h("h3", {}, tr("Clima en combate")), weatherSel,
+    h("h3", {}, tr("Al entrar al mapa")), enterBox,
+    h("h3", {}, tr("Al salir del mapa")), exitBox,
+    h("h3", {}, tr("Inspector")), inspector,
+    h("p", { class: "hint" }, tr("Rueda: zoom · Clic derecho / Espacio+arrastrar: mover · Ctrl+Z / Ctrl+Y: deshacer/rehacer · Supr: borrar selección")),
   );
   const togglePlay = () => {
-    if (view.playing) { view.stopPlay(); playBtn.textContent = "▶ Probar"; side.classList.remove("disabled"); sync(); }
-    else { view.startPlay(); playBtn.textContent = "■ Detener"; side.classList.add("disabled"); }
+    if (view.playing) { view.stopPlay(); playBtn.textContent = tr("▶ Probar"); side.classList.remove("disabled"); sync(); }
+    else { view.startPlay(); playBtn.textContent = tr("■ Detener"); side.classList.add("disabled"); }
   };
   playBtn.onclick = togglePlay;
   btn3d.onclick = async () => {
     const ok = await view.set3D(!view.mode3d);
     btn3d.classList.toggle("sel", view.mode3d && ok);
   };
-  const muteBtn = h("button", { title: "Silenciar / activar sonido", onclick: () => { setMuted(!isMuted()); muteBtn.textContent = isMuted() ? "🔇" : "🔊"; } }, "🔊");
+  const muteBtn = h("button", { title: tr("Silenciar / activar sonido"), onclick: () => { setMuted(!isMuted()); muteBtn.textContent = isMuted() ? "🔇" : "🔊"; } }, "🔊");
 
-  const mapTab = h("div", { class: "maptab" }, side, h("div", { class: "stage" }, view.el), h("aside", { class: "log-panel" }, h("h3", {}, "Mensajes"), log));
+  const mapTab = h("div", { class: "maptab" }, side, h("div", { class: "stage" }, view.el), h("aside", { class: "log-panel" }, h("h3", {}, tr("Mensajes")), log));
 
   // ---------- Pestañas ----------
-  const data = dataPanel(() => project, { onChange: () => { persist(); battle.refresh(); }, onAtlas: (u) => void applyAtlas(u) });
+  const data = dataPanel(() => project, { onChange: () => { persist(); battle.refresh(); }, onAtlas: (u) => void applyAtlas(u), onReplace: (p) => void loadProject(p) });
   const battle = battlePanel(() => project, engine);
-  const tabs: [string, string, HTMLElement][] = [["map", "🗺️ Mapa", mapTab], ["data", "📋 Datos", data.el], ["battle", "⚔️ Calculadora", battle.el]];
+  const tabs: [string, string, HTMLElement][] = [["map", tr("🗺️ Mapa"), mapTab], ["data", tr("📋 Datos"), data.el], ["battle", tr("⚔️ Calculadora"), battle.el]];
   const body = h("main", {});
   const tabBar = h("nav", { class: "tabs" });
   const show = (id: string) => {
@@ -311,10 +313,10 @@ async function main() {
   /** Diálogo para crear un proyecto nuevo a partir de una plantilla. */
   const newProject = () => {
     const dlg = h("dialog", { class: "modal" },
-      h("h3", {}, "Nuevo proyecto"),
-      h("p", { class: "hint" }, "Se sustituye el proyecto actual: exporta antes lo que quieras conservar."),
+      h("h3", {}, tr("Nuevo proyecto")),
+      h("p", { class: "hint" }, tr("Se sustituye el proyecto actual: exporta antes lo que quieras conservar.")),
       ...TEMPLATES.map((t) => h("button", { class: "tpl", onclick: async () => { dlg.close(); await loadProject(t.build()); say(`Proyecto «${t.name}» creado.`); } }, h("b", {}, t.name), h("small", {}, t.description))),
-      h("button", { onclick: () => dlg.close() }, "Cancelar"));
+      h("button", { onclick: () => dlg.close() }, tr("Cancelar")));
     dlg.addEventListener("close", () => dlg.remove());
     document.body.append(dlg);
     dlg.showModal();
@@ -323,21 +325,24 @@ async function main() {
   const top = h("header", { class: "top" },
     h("div", { class: "brand" }, "◓ WebPokeEditor"), nameIn,
     h("div", { class: "grow" }), status,
-    h("button", { onclick: () => fileIn.click() }, "Importar"), h("button", { onclick: exportJson, title: "Guarda el proyecto (.wpe.json) para seguir editándolo" }, "Exportar proyecto"),
-    h("button", { onclick: exportGame, title: "Genera un único .html jugable con tu juego" }, "📦 Exportar juego"),
-    h("button", { onclick: () => newProject() }, "Nuevo"),
+    h("button", { onclick: () => fileIn.click() }, tr("Importar")), h("button", { onclick: exportJson, title: tr("Guarda el proyecto (.wpe.json) para seguir editándolo") }, tr("Exportar proyecto")),
+    h("button", { onclick: exportGame, title: tr("Genera un único .html jugable con tu juego") }, tr("📦 Exportar juego")),
+    h("button", { onclick: () => newProject() }, tr("Nuevo")),
+    h("select", { title: tr("Idioma de la interfaz"), onchange: (e: Event) => { setLang((e.target as HTMLSelectElement).value as Lang); location.reload(); } }, ...LANGS.map(([k, l]) => h("option", { value: k, selected: getLang() === k }, l))),
     muteBtn, btn3d, playBtn, fileIn,
   );
-  const footer = h("footer", {}, h("span", {}, "Motor: Rust → WASM · Render: "), h("b", {}, "…"), h("span", {}, " · Sin afiliación con Nintendo/Game Freak/The Pokémon Company. Criaturas y arte originales; importa tus propios gráficos en Datos."));
+  const motion = h("label", { class: "check inline", title: tr("Desactiva animaciones (hierba, agua, sacudidas)") }, h("input", { type: "checkbox", checked: reducedMotion(), onchange: (e: Event) => { const v = (e.target as HTMLInputElement).checked; setReducedMotion(v); } }), tr("Movimiento reducido"));
+  const footer = h("footer", {}, motion, h("span", {}, tr("Motor: Rust → WASM · Render: ")), h("b", {}, "…"), h("span", {}, " · Sin afiliación con Nintendo/Game Freak/The Pokémon Company. Criaturas y arte originales; importa tus propios gráficos en Datos."));
 
   app.append(top, tabBar, body, footer);
+  enhanceA11y(app);
   await view.init(project, atlas);
   footer.querySelector("b")!.textContent = view.rendererKind === "webgpu" ? "WebGPU (+3D)" : "Canvas 2D (sin WebGPU, sin modo 3D)";
   buildPalette(); selectTile(1); setTool("paint"); show("map"); sync();
-  status.textContent = "Listo";
+  status.textContent = tr("Listo");
   if (import.meta.env.PROD && "serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
   { const warn = validate(project); if (warn.length) say(`⚠ El proyecto guardado tiene ${warn.length} aviso(s); revisa: ${warn[0]}`); }
-  say("Bienvenido. Pinta el mapa, coloca NPC y saltos, y pulsa ▶ Probar. Prueba también 🧊 3D.");
+  say(tr("Bienvenido. Pinta el mapa, coloca NPC y saltos, y pulsa ▶ Probar. Prueba también 🧊 3D."));
   void ((window as unknown as Record<string, unknown>).__wpe = { engine, view, audio: audioStats, get project() { return project; } });
 }
 

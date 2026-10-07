@@ -1,6 +1,7 @@
 import { type Action, type Battle, type BattleEvent, type Snapshot, monMaxHp, monName } from "../battle";
 import { sfx } from "../audio";
 import { h } from "../dom";
+import { t as tr } from "../i18n";
 import type { Project } from "../project";
 import { speciesImage } from "../sprites";
 
@@ -69,38 +70,38 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
       menu.replaceChildren();
       msg.textContent = title;
       for (const o of options) menu.append(h("button", { disabled: !!o.disabled, onclick: (e: Event) => { e.stopPropagation(); sfx("select"); res(o.value); } }, o.label));
-      if (back) menu.append(h("button", { class: "back", onclick: (e: Event) => { e.stopPropagation(); res(null); } }, "← Volver"));
+      if (back) menu.append(h("button", { class: "back", onclick: (e: Event) => { e.stopPropagation(); res(null); } }, tr("← Volver")));
     });
 
   const pickReserve = (forced: boolean): Promise<number | null> => {
-    const opts = b.party.map((m, i) => ({ label: `${monName(p, m)} Nv.${m.level} (${m.hp}/${monMaxHp(p, m)})`, value: i, disabled: !b.reserves.includes(i) }));
-    return choose("¿A quién envías?", opts, !forced);
+    const opts = b.party.map((m, i) => ({ label: tr("{0} Nv.{1} ({2}/{3})", monName(p, m), m.level, m.hp, monMaxHp(p, m)), value: i, disabled: !b.reserves.includes(i) }));
+    return choose(tr("¿A quién envías?"), opts, !forced);
   };
 
   const askSlot = async (slot: number): Promise<Action> => {
     const mon = b.party[b.pa[slot]];
     for (;;) {
-      const top = await choose<string>(`¿Qué hará ${monName(p, mon)}?`, [
-        { label: "⚔️ Luchar", value: "fight" }, { label: "🎒 Mochila", value: "bag" },
-        { label: "🔄 Equipo", value: "team" }, { label: "🏃 Huir", value: "run", disabled: b.isTrainer },
+      const top = await choose<string>(tr("¿Qué hará {0}?", monName(p, mon)), [
+        { label: tr("⚔️ Luchar"), value: "fight" }, { label: tr("🎒 Mochila"), value: "bag" },
+        { label: tr("🔄 Equipo"), value: "team" }, { label: tr("🏃 Huir"), value: "run", disabled: b.isTrainer },
       ]);
       if (top === "fight") {
-        const a = await choose<number>("Elige un movimiento", mon.moves.map((id, i) => {
+        const a = await choose<number>(tr("Elige un movimiento"), mon.moves.map((id, i) => {
           const mv = b.moveOf(id);
           return { label: mv ? `${mv.name} · ${p.types[mv.type]} · ${mv.power}` : id, value: i };
         }), true);
         if (a === null) continue;
         let target = b.foeSlots[0];
         if (b.foeSlots.length > 1) {
-          const t = await choose<number>("¿A quién atacas?", b.foeSlots.map((s) => ({ label: monName(p, b.foes[b.fa[s]]), value: s })), true);
+          const t = await choose<number>(tr("¿A quién atacas?"), b.foeSlots.map((s) => ({ label: monName(p, b.foes[b.fa[s]]), value: s })), true);
           if (t === null) continue;
           target = t;
         }
         let form = false;
-        if (b.canForm(slot)) form = (await choose<boolean>("¿Transformarte este turno?", [{ label: "✨ Sí", value: true }, { label: "No", value: false }], false)) ?? false;
+        if (b.canForm(slot)) form = (await choose<boolean>(tr("¿Transformarte este turno?"), [{ label: tr("✨ Sí"), value: true }, { label: tr("No"), value: false }], false)) ?? false;
         return { kind: "move", index: a, target, form };
       } else if (top === "bag") {
-        const a = await choose<string>("Mochila", p.items.filter((it) => it.kind !== "key").map((it) => ({
+        const a = await choose<string>(tr("Mochila"), p.items.filter((it) => it.kind !== "key").map((it) => ({
           label: `${it.name} ×${b.opts.inv[it.id] ?? 0}`, value: it.id,
           disabled: (b.opts.inv[it.id] ?? 0) <= 0 || (it.kind === "ball" && (b.isTrainer || b.size > 1)),
         })), true);
@@ -114,9 +115,9 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
 
   apply(b.snap());
   sfx("encounter");
-  await say(b.isTrainer ? `¡${b.opts.trainer} quiere combatir!` : `¡Un ${monName(p, b.foe)} salvaje apareció!`, 1200);
-  if (b.size > 1) await say("¡Es un combate doble!", 800);
-  await say(`¡Adelante, ${b.pa.filter((i) => i >= 0).map((i) => monName(p, b.party[i])).join(" y ")}!`, 700);
+  await say(b.isTrainer ? tr("¡{0} quiere combatir!", b.opts.trainer ?? "") : tr("¡Un {0} salvaje apareció!", monName(p, b.foe)), 1200);
+  if (b.size > 1) await say(tr("¡Es un combate doble!"), 800);
+  await say(tr("¡Adelante, {0}!", b.pa.filter((i) => i >= 0).map((i) => monName(p, b.party[i])).join(tr(" y "))), 700);
   await play(b.startEvents);
 
   while (!b.result) {
@@ -139,7 +140,7 @@ export async function runBattleUi(host: HTMLElement, p: Project, b: Battle): Pro
     await play(b.turn(actions));
   }
   menu.replaceChildren();
-  const end = { win: "¡Has ganado el combate!", lose: "Te quedaste sin criaturas en condiciones...", run: "", caught: "" }[b.result];
+  const end = { win: tr("¡Has ganado el combate!"), lose: tr("Te quedaste sin criaturas en condiciones..."), run: "", caught: "" }[b.result];
   if (end) await say(end, 1300);
   root.remove();
 }

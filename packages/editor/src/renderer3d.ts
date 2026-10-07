@@ -1,4 +1,5 @@
 /** Renderer 3D (WebGPU) estilo DS: terreno por tiles con alturas, billboards y cámara orbital inclinada. */
+import { reducedMotion } from "./a11y";
 import { ANIM_MS, ATLAS_COLS, ATLAS_ROWS, BB_FENCE, BB_FLOWER, BB_ROCK, BB_SIGN, BB_TREE, BB_TUFT, TILE_ANIM, TILE_HEIGHT, atlasIndex } from "./tiles";
 
 const SHADER = /* wgsl */ `
@@ -220,7 +221,7 @@ export class Renderer3D {
     const view = lookAt(eye, [cam.x, 0.5, cam.z]);
     const vp = mul(perspective((40 * Math.PI) / 180, this.w / this.h, 0.1, 80), view);
     this.device.queue.writeBuffer(this.ubuf, 0, vp.buffer as ArrayBuffer, vp.byteOffset, 64);
-    this.device.queue.writeBuffer(this.ubuf, 64, new Float32Array([eye[0], eye[1], eye[2], 1, SKY[0], SKY[1], SKY[2], 1, cam.dist + 5, cam.dist + 22, Math.floor(performance.now() / ANIM_MS) % 2, 0]));
+    this.device.queue.writeBuffer(this.ubuf, 64, new Float32Array([eye[0], eye[1], eye[2], 1, SKY[0], SKY[1], SKY[2], 1, cam.dist + 5, cam.dist + 22, reducedMotion() ? 0 : Math.floor(performance.now() / ANIM_MS) % 2, 0]));
 
     // Billboards: ejes del plano de pantalla (cilíndrico alrededor de Y)
     const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);

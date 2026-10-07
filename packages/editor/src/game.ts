@@ -1,5 +1,6 @@
 /** Reglas de juego en ejecución: NPCs, saltos entre mapas, entrenadores, encuentros y combates. */
 import { sfx } from "./audio";
+import { t as tr } from "./i18n";
 import { Battle, type Mon, healAll, makeMon } from "./battle";
 import { type ScriptCtx, parseScript, runScript } from "./script";
 import { type Engine, Ev } from "./engine";
@@ -137,7 +138,7 @@ export class Game {
     sfx("warp");
     this.mapIndex = i;
     this.host.loadMap(i, x, y);
-    this.host.say(`Entras en ${this.map.name}.`);
+    this.host.say(tr("Entras en {0}.", this.map.name));
     await this.runMapEnter();
   }
 
@@ -157,7 +158,7 @@ export class Game {
         await this.host.dialog(npc.name, npc.lines.slice(0, 1));
         healAll(this.p, this.party);
         sfx("heal");
-        await this.host.dialog(npc.name, npc.lines.slice(1).length ? npc.lines.slice(1) : ["¡Listo!"]);
+        await this.host.dialog(npc.name, npc.lines.slice(1).length ? npc.lines.slice(1) : [tr("¡Listo!")]);
       } else if (npc.kind === "shop") {
         await this.shop(npc);
       } else if (npc.kind === "trainer") {
@@ -174,10 +175,10 @@ export class Game {
   private scriptCtx(npc: Npc | null, speaker = npc?.name ?? null): ScriptCtx {
     return {
       say: (lines) => this.host.dialog(speaker, lines),
-      give: (item, n) => { this.inv[item] = (this.inv[item] ?? 0) + n; this.e.setVar("item_" + item, this.inv[item]); sfx("heal"); this.host.say(`Recibes ${n} × ${this.p.items.find((i) => i.id === item)?.name ?? item}.`); },
+      give: (item, n) => { this.inv[item] = (this.inv[item] ?? 0) + n; this.e.setVar("item_" + item, this.inv[item]); sfx("heal"); this.host.say(tr("Recibes {0} × {1}.", n, this.p.items.find((i) => i.id === item)?.name ?? item)); },
       heal: () => { healAll(this.p, this.party); sfx("heal"); },
       battle: async (sp, lv) => { await this.fight([makeMon(this.p, sp, lv)]); },
-      givemon: (sp, lv) => { if (this.party.length < 6) { this.party.push(makeMon(this.p, sp, lv)); sfx("catch"); this.host.say("¡Un nuevo compañero se une a tu equipo!"); } },
+      givemon: (sp, lv) => { if (this.party.length < 6) { this.party.push(makeMon(this.p, sp, lv)); sfx("catch"); this.host.say(tr("¡Un nuevo compañero se une a tu equipo!")); } },
       warp: (m, x, y) => this.warpTo(m, x, y),
       choose: (o) => this.host.choose(o),
       equip: (item) => this.equip(item),
@@ -188,30 +189,30 @@ export class Game {
   async shop(npc: Npc) {
     const def = (id: string) => this.p.items.find((i) => i.id === id);
     const stock = (npc.stock ?? []).map(def).filter((i): i is NonNullable<typeof i> => !!i && (i.price ?? 0) > 0);
-    await this.host.dialog(npc.name, [npc.lines[0] ?? "¡Bienvenido! ¿Qué te pongo?"]);
+    await this.host.dialog(npc.name, [npc.lines[0] ?? tr("¡Bienvenido! ¿Qué te pongo?")]);
     for (;;) {
-      const top = await this.host.choose([`Comprar`, `Vender`, `Salir  (${this.money} monedas)`]);
+      const top = await this.host.choose([tr("Comprar"), tr("Vender"), tr("Salir  ({0} monedas)", this.money)]);
       if (top === 0) {
-        const k = await this.host.choose([...stock.map((i) => `${i.name} (${i.price})`), "Volver"]);
+        const k = await this.host.choose([...stock.map((i) => `${i.name} (${i.price})`), tr("Volver")]);
         const it = stock[k];
         if (!it) continue;
-        if (this.money < it.price!) { await this.host.dialog(npc.name, ["No tienes suficientes monedas."]); continue; }
+        if (this.money < it.price!) { await this.host.dialog(npc.name, [tr("No tienes suficientes monedas.")]); continue; }
         this.money -= it.price!;
         this.inv[it.id] = (this.inv[it.id] ?? 0) + 1;
         sfx("heal");
-        await this.host.dialog(npc.name, [`¡Gracias por tu compra de ${it.name}!`]);
+        await this.host.dialog(npc.name, [tr("¡Gracias por tu compra de {0}!", it.name)]);
       } else if (top === 1) {
         const mine = this.p.items.filter((i) => i.kind !== "key" && (i.price ?? 0) > 0 && (this.inv[i.id] ?? 0) > 0);
-        if (!mine.length) { await this.host.dialog(npc.name, ["No tienes nada que pueda comprarte."]); continue; }
-        const k = await this.host.choose([...mine.map((i) => `${i.name} ×${this.inv[i.id]} (${Math.floor(i.price! / 2)})`), "Volver"]);
+        if (!mine.length) { await this.host.dialog(npc.name, [tr("No tienes nada que pueda comprarte.")]); continue; }
+        const k = await this.host.choose([...mine.map((i) => `${i.name} ×${this.inv[i.id]} (${Math.floor(i.price! / 2)})`), tr("Volver")]);
         const it = mine[k];
         if (!it) continue;
         this.inv[it.id]--;
         this.money += Math.floor(it.price! / 2);
         sfx("heal");
-        await this.host.dialog(npc.name, [`Te compro ${it.name} por ${Math.floor(it.price! / 2)} monedas.`]);
+        await this.host.dialog(npc.name, [tr("Te compro {0} por {1} monedas.", it.name, Math.floor(it.price! / 2))]);
       } else {
-        await this.host.dialog(npc.name, ["¡Vuelve cuando quieras!"]);
+        await this.host.dialog(npc.name, [tr("¡Vuelve cuando quieras!")]);
         return;
       }
     }
@@ -220,26 +221,26 @@ export class Game {
   /** Equipa un objeto del inventario a la primera criatura sin objeto (si todas llevan uno, cambia el de la primera). */
   private equip(itemId: string) {
     const def = this.p.items.find((i) => i.id === itemId);
-    if (!def || def.kind !== "held") { this.host.say(`"${itemId}" no es un objeto equipable.`); return; }
-    if ((this.inv[itemId] ?? 0) <= 0) { this.host.say(`No tienes ${def.name}.`); return; }
+    if (!def || def.kind !== "held") { this.host.say(tr("«{0}» no es un objeto equipable.", itemId)); return; }
+    if ((this.inv[itemId] ?? 0) <= 0) { this.host.say(tr("No tienes {0}.", def.name)); return; }
     const target = this.party.find((m) => !m.held) ?? this.party[0];
     if (!target) return;
     if (target.held) this.inv[target.held] = (this.inv[target.held] ?? 0) + 1;
     this.inv[itemId]--;
     target.held = itemId;
     sfx("heal");
-    this.host.say(`${this.p.species.find((s) => s.id === target.species)?.name ?? "La criatura"} lleva ahora ${def.name}.`);
+    this.host.say(tr("{0} lleva ahora {1}.", this.p.species.find((s) => s.id === target.species)?.name ?? tr("La criatura"), def.name));
   }
 
   private async challenge(n: Npc) {
     this.npcDirs.set(this.key(n), n.x === this.e.cell.x ? (this.e.cell.y > n.y ? 0 : 1) : (this.e.cell.x > n.x ? 3 : 2));
-    await this.host.dialog(n.name, n.lines.length ? n.lines : ["¡Combatamos!"]);
+    await this.host.dialog(n.name, n.lines.length ? n.lines : [tr("¡Combatamos!")]);
     const foes = (n.team ?? []).map((t) => makeMon(this.p, t.species, t.level, t.held));
     if (!foes.length) return;
     const res = await this.fight(foes, n.name, n.double);
     if (res === "win") {
       this.defeated.add(this.key(n));
-      await this.host.dialog(n.name, n.defeatedLines?.length ? n.defeatedLines : ["Me has vencido."]);
+      await this.host.dialog(n.name, n.defeatedLines?.length ? n.defeatedLines : [tr("Me has vencido.")]);
       const r = n.winScript ? parseScript(n.winScript) : null;
       if (r?.ok) { try { await this.exec(r.code, this.scriptCtx(n)); } catch (err) { this.host.say((err as Error).message); } }
     }
@@ -255,13 +256,13 @@ export class Game {
   }
 
   private async fight(foes: Mon[], trainer?: string, double?: boolean) {
-    if (!this.party.length) { await this.host.dialog(null, ["Todavía no tienes ninguna criatura que combata por ti."]); return null; }
+    if (!this.party.length) { await this.host.dialog(null, [tr("Todavía no tienes ninguna criatura que combata por ti.")]); return null; }
     if (!this.party.some((m) => m.hp > 0)) healAll(this.p, this.party);
     const b = new Battle(this.p, this.e, this.party, foes, { trainer, double, weather: this.map.weather, inv: this.inv });
     await this.host.battle(b);
     if (b.result === "lose") {
       healAll(this.p, this.party);
-      await this.host.dialog(null, ["Todo se vuelve negro...", "Te llevan de vuelta al inicio y curan a tu equipo."]);
+      await this.host.dialog(null, [tr("Todo se vuelve negro..."), tr("Te llevan de vuelta al inicio y curan a tu equipo.")]);
       this.mapIndex = Math.max(0, this.p.maps.findIndex((m) => m.id === this.p.start.map));
       this.host.loadMap(this.mapIndex, this.p.start.x, this.p.start.y);
       await this.runMapEnter();

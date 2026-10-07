@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Engine } from "./engine";
 import { type Project, decodeTiles, parseProject, validate } from "./project";
 import { type Instr, parseScript, runScript } from "./script";
-import { TEMPLATES, archipelagoProject } from "./templates";
+import { TEMPLATES, archipelagoProject, valleProject } from "./templates";
 
 const wasm = () => readFileSync(new URL("../public/engine_core.wasm", import.meta.url));
 const SOLID_TILES = new Set([3, 4, 5, 11]);
@@ -37,6 +37,45 @@ function reachable(p: Project, mapId: string, from: [number, number][]) {
   return { m, seen, free };
 }
 
+function reachProblems(p: Project): string[] {
+  const arrivals = new Map<string, [number, number][]>(p.maps.map((m) => [m.id, []]));
+  arrivals.get(p.start.map)!.push([p.start.x, p.start.y]);
+  for (const m of p.maps) for (const w of m.warps) arrivals.get(w.toMap)!.push([w.toX, w.toY]);
+  const problems: string[] = [];
+  for (const m of p.maps) {
+    const { seen, free } = reachable(p, m.id, arrivals.get(m.id)!);
+    for (const [x, y] of arrivals.get(m.id)!) if (!free(x, y)) problems.push(`${m.id}: llegada bloqueada en (${x},${y})`);
+    for (const w of m.warps) if (!seen.has(w.y * m.w + w.x)) problems.push(`${m.id}: salto inalcanzable en (${w.x},${w.y})`);
+    for (const t of m.triggers ?? []) if (!seen.has(t.y * m.w + t.x)) problems.push(`${m.id}: disparador inalcanzable en (${t.x},${t.y})`);
+    for (const n of m.npcs) {
+      const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => seen.has((n.y + dy) * m.w + n.x + dx));
+      if (!near) problems.push(`${m.id}: NPC "${n.name}" sin casilla libre al lado`);
+    }
+  }
+  return problems;
+}
+function returnProblems(p: Project): string[] {
+  const bad: string[] = [];
+  for (const m of p.maps) for (const w of m.warps) {
+    const dest = p.maps.find((k) => k.id === w.toMap);
+    if (!dest) bad.push(`${m.id} → ${w.toMap}: destino inexistente`);
+    else if (!dest.warps.some((b) => b.toMap === m.id)) bad.push(`${m.id} → ${w.toMap}: sin retorno`);
+  }
+  return bad;
+}
+/** Las marcas que consultan los guiones y las puertas deben activarse en algún sitio, y las pedidas deben existir. */
+function flagProblems(p: Project, required: string[]): string[] {
+  const set = new Set<string>(), needed = new Set<string>(), out: string[] = [];
+  const scan = (code: Instr[]) => { for (const i of code) { if (i.op === "flag") set.add(i.name); if (i.op === "jif") needed.add(i.flag); } };
+  for (const m of p.maps) {
+    const scripts = [m.onEnter, m.onExit, ...(m.triggers ?? []).map((t) => t.script), ...m.npcs.flatMap((n) => [n.script, n.winScript])];
+    for (const s of scripts) if (s) { const r = parseScript(s); if (r.ok) scan(r.code); }
+  }
+  for (const f of required) if (!set.has(f)) out.push(`ningún guion activa "${f}"`);
+  for (const f of needed) if (!set.has(f)) out.push(`se consulta "${f}" pero nunca se activa`);
+  return out;
+}
+
 describe("plantilla «Archipiélago de la Marea»", () => {
   const p = archipelagoProject();
 
@@ -50,41 +89,15 @@ describe("plantilla «Archipiélago de la Marea»", () => {
   });
 
   it("todo es alcanzable: puertas, saltos, disparadores y NPC (con espacio para interactuar)", () => {
-    const arrivals = new Map<string, [number, number][]>(p.maps.map((m) => [m.id, []]));
-    arrivals.get(p.start.map)!.push([p.start.x, p.start.y]);
-    for (const m of p.maps) for (const w of m.warps) arrivals.get(w.toMap)!.push([w.toX, w.toY]);
-    const problems: string[] = [];
-    for (const m of p.maps) {
-      const { seen, free } = reachable(p, m.id, arrivals.get(m.id)!);
-      for (const [x, y] of arrivals.get(m.id)!) if (!free(x, y)) problems.push(`${m.id}: llegada bloqueada en (${x},${y})`);
-      for (const w of m.warps) if (!seen.has(w.y * m.w + w.x)) problems.push(`${m.id}: salto inalcanzable en (${w.x},${w.y})`);
-      for (const t of m.triggers ?? []) if (!seen.has(t.y * m.w + t.x)) problems.push(`${m.id}: disparador inalcanzable en (${t.x},${t.y})`);
-      for (const n of m.npcs) {
-        const near = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => seen.has((n.y + dy) * m.w + n.x + dx));
-        if (!near) problems.push(`${m.id}: NPC "${n.name}" sin casilla libre al lado`);
-      }
-    }
-    expect(problems).toEqual([]);
+    expect(reachProblems(p)).toEqual([]);
   });
 
   it("los saltos de ida y vuelta son coherentes (cada puerta tiene su retorno al mismo sitio)", () => {
-    const bad: string[] = [];
-    for (const m of p.maps) for (const w of m.warps) {
-      const dest = p.maps.find((k) => k.id === w.toMap)!;
-      if (!dest.warps.some((b) => b.toMap === m.id)) bad.push(`${m.id} → ${w.toMap}: sin retorno`);
-    }
-    expect(bad).toEqual([]);
+    expect(returnProblems(p)).toEqual([]);
   });
 
   it("la progresión es consistente: las puertas usan marcas que algún guion activa, y hay 8 medallas", () => {
-    const set = new Set<string>(), needed = new Set<string>();
-    const scan = (code: Instr[]) => { for (const i of code) { if (i.op === "flag") set.add(i.name); if (i.op === "jif") needed.add(i.flag); } };
-    for (const m of p.maps) {
-      const scripts = [m.onEnter, m.onExit, ...(m.triggers ?? []).map((t) => t.script), ...m.npcs.flatMap((n) => [n.script, n.winScript])];
-      for (const s of scripts) if (s) { const r = parseScript(s); if (r.ok) scan(r.code); }
-    }
-    for (const f of ["starter", "medalla1", "medalla2", "medalla3", "medalla4", "medalla5", "medalla6", "medalla7", "medalla8", "campeon", "rival1", "rival2", "rival3", "rival4", "rival5", "vortice1"]) expect(set.has(f), `ningún guion activa "${f}"`).toBe(true);
-    for (const f of needed) expect(set.has(f), `se consulta "${f}" pero nunca se activa`).toBe(true);
+    expect(flagProblems(p, ["starter", "medalla1", "medalla2", "medalla3", "medalla4", "medalla5", "medalla6", "medalla7", "medalla8", "campeon", "rival1", "rival2", "rival3", "rival4", "rival5", "vortice1"])).toEqual([]);
   });
 
   it("los guiones clave funcionan en la VM: elegir inicial y ganar la medalla", async () => {
@@ -168,5 +181,26 @@ describe("plantilla «Archipiélago de la Marea»", () => {
     expect(peak("cima")).toBeLessThan(peak("duna"));
     expect(peak("duna")).toBeLessThan(peak("selvia"));
     expect(peak("selvia")).toBeLessThan(peak("aldo"));
+  });
+});
+
+describe("plantilla «Valle del Alba»", () => {
+  const p = valleProject();
+  it("es válida, está registrada y tiene 4 medallas y un campeón", () => {
+    expect(validate(p)).toEqual([]);
+    expect(parseProject(JSON.stringify(p)).maps).toHaveLength(p.maps.length);
+    expect(TEMPLATES.map((t) => t.id)).toContain("valle");
+    expect(p.maps.length).toBeGreaterThanOrEqual(15);
+  });
+  it("todo es alcanzable, las puertas tienen retorno y las marcas son coherentes", () => {
+    expect(reachProblems(p)).toEqual([]);
+    expect(returnProblems(p)).toEqual([]);
+    expect(flagProblems(p, ["starter", "medalla1", "medalla2", "medalla3", "medalla4", "campeon"])).toEqual([]);
+  });
+  it("los líderes suben de nivel hasta el campeón", () => {
+    const peak = (id: string) => Math.max(...p.maps.flatMap((m) => m.npcs).find((n) => n.id === id)!.team!.map((t) => t.level));
+    expect(peak("roble")).toBeLessThan(peak("nube"));
+    expect(peak("nube")).toBeLessThan(peak("pena"));
+    expect(peak("pena")).toBeLessThan(peak("cristal"));
   });
 });

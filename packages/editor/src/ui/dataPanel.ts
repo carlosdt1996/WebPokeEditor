@@ -2,16 +2,20 @@ import { h } from "../dom";
 import { ATLAS_COLS, ATLAS_ROWS, TILE, createAtlas } from "../tiles";
 import { BATTLE_STATS, BATTLE_STAT_NAMES, STATUS_KINDS, STATUS_NAMES, STAT_KEYS, WEATHER_KINDS, WEATHER_NAMES, defaultWeatherRules, type AbilityDef, type BattleStat, type HoldEffect, type Move, type Project, type Species, type StatusKind, type WeatherKind, uniqueId } from "../project";
 import { importImage, speciesImage } from "../sprites";
+import { type Conflict, applyPack, makePack, parsePack } from "../pack";
 import { movesFromCsv, movesToCsv, speciesFromCsv, speciesToCsv } from "../csv";
 
-const download = (name: string, text: string) => { const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/csv" })), download: name }); a.click(); URL.revokeObjectURL(a.href); };
+const download = (name: string, text: string, type = "text/csv") => { const a = h("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name }); a.click(); URL.revokeObjectURL(a.href); };
 
-export interface DataHooks { onChange(): void; onAtlas(url: string | null): void }
+export interface DataHooks { onChange(): void; onAtlas(url: string | null): void; /** Sustituye el proyecto entero (p. ej. tras importar un pack). */ onReplace(p: Project): void }
 
 export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HTMLElement; refresh(): void } {
   const el = h("div", { class: "panel" });
   const onChange = hooks.onChange;
   let encMap = 0;
+  // Packs: qué incluir al exportar y cómo resolver choques de ids al importar
+  const packSel = { species: true, moves: true, items: true, abilities: true, atlas: false, maps: new Set<string>() };
+  let packName = "Mi pack", packConflict: Conflict = "rename";
 
   const num = (v: number, on: (n: number) => void, min = 0, max = 999) =>
     h("input", { type: "number", min, max, value: v, class: "n", oninput: (e: Event) => { on(Math.min(max, Math.max(min, +(e.target as HTMLInputElement).value || 0))); onChange(); } });
@@ -184,6 +188,20 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
     const mapSel = h("select", { onchange: (e: Event) => { encMap = +(e.target as HTMLSelectElement).value; render(); } }, ...p.maps.map((m, i) => h("option", { value: i, selected: i === encMap }, m.name)));
     const em = p.maps[Math.min(encMap, p.maps.length - 1)];
 
+    // Importar un pack
+    const packFile = h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: async (e: Event) => {
+      const f = (e.target as HTMLInputElement).files?.[0];
+      if (!f) return;
+      try {
+        const r = applyPack(p, parsePack(await f.text()), packConflict);
+        hooks.onReplace(r.project);
+        const a = r.added;
+        alert([`Pack importado: +${a.species} especies, +${a.moves} movimientos, +${a.items} objetos, +${a.abilities} habilidades, +${a.maps} mapas, +${a.types} tipos.`,
+          ...Object.entries(r.renamed).map(([k, v]) => `Renombrado: ${k} → ${v}`), ...r.skipped.map((s) => `Omitido: ${s}`), ...r.warnings].join("\n"));
+      } catch (err) { alert((err as Error).message); }
+      (e.target as HTMLInputElement).value = "";
+    } });
+
     // Gráficos propios
     const atlasFile = h("input", { type: "file", accept: "image/png", hidden: true, onchange: async (e: Event) => {
       const f = (e.target as HTMLInputElement).files?.[0];
@@ -238,6 +256,20 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
         h("button", { onclick: () => { em.encounters.splice(i, 1); onChange(); render(); } }, "×")))),
       h("select", { onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v && em) { em.encounters.push(v); onChange(); render(); } } },
         h("option", { value: "" }, "+ Añadir especie al encuentro…"), ...p.species.map((s) => h("option", { value: s.id }, s.name))),
+      h("h2", {}, "Packs: compartir y reutilizar contenido"),
+      h("p", { class: "muted" }, "Un pack (.wpe-pack.json) agrupa especies, movimientos, objetos, habilidades, mapas y tileset para compartirlos o reutilizarlos en otro proyecto. Se arrastran las dependencias (movimientos de las especies, criaturas de los mapas…)."),
+      h("div", { class: "row" }, "Nombre", h("input", { type: "text", value: packName, oninput: (e: Event) => { packName = (e.target as HTMLInputElement).value; } })),
+      h("div", { class: "row" }, ...([["species", "Especies"], ["moves", "Movimientos"], ["items", "Objetos"], ["abilities", "Habilidades"], ["atlas", "Tileset"]] as const).map(([k, l]) =>
+        h("label", { class: "check inline" }, h("input", { type: "checkbox", checked: packSel[k], onchange: (e: Event) => { packSel[k] = (e.target as HTMLInputElement).checked; } }), l))),
+      h("div", { class: "row" }, "Mapas:", ...p.maps.map((m) => h("label", { class: "check inline" }, h("input", { type: "checkbox", checked: packSel.maps.has(m.id), onchange: (e: Event) => { if ((e.target as HTMLInputElement).checked) packSel.maps.add(m.id); else packSel.maps.delete(m.id); } }), m.name))),
+      h("div", { class: "row" },
+        h("button", { onclick: () => {
+          const pack = makePack(p, { species: packSel.species ? p.species.map((s) => s.id) : [], moves: packSel.moves ? p.moves.map((m) => m.id) : [], items: packSel.items ? p.items.map((i) => i.id) : [], abilities: packSel.abilities ? (p.abilities ?? []).map((a) => a.id) : [], maps: [...packSel.maps], atlas: packSel.atlas }, { name: packName || "pack" });
+          download(`${(packName || "pack").replace(/\W+/g, "-")}.wpe-pack.json`, JSON.stringify(pack, null, 2), "application/json");
+        } }, "Exportar pack"),
+        h("select", { title: "Si un id ya existe", onchange: (e: Event) => { packConflict = (e.target as HTMLSelectElement).value as Conflict; } },
+          h("option", { value: "rename", selected: packConflict === "rename" }, "Si choca: renombrar"), h("option", { value: "skip", selected: packConflict === "skip" }, "Si choca: omitir"), h("option", { value: "replace", selected: packConflict === "replace" }, "Si choca: reemplazar")),
+        h("button", { onclick: () => packFile.click() }, "Importar pack"), packFile),
       h("h2", {}, "Gráficos propios (tileset y personajes)"),
       h("p", { class: "muted" }, `Puedes reemplazar los gráficos por los tuyos con una imagen PNG de ${ATLAS_COLS * TILE}×${ATLAS_ROWS * TILE} px (cuadrícula de ${ATLAS_COLS}×${ATLAS_ROWS} celdas de ${TILE}px, mismo orden que la plantilla). Descarga la plantilla para ver qué va en cada celda. La imagen se guarda solo en tu proyecto y no se publica.`),
       h("div", { class: "row" },

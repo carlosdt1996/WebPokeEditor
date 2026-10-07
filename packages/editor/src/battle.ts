@@ -4,6 +4,7 @@
  * eventos devuelta a texto en español. Es reproducible por semilla (usa el mismo RNG que el mundo).
  */
 import type { Engine } from "./engine";
+import { t } from "./i18n";
 import { BATTLE_STATS, BATTLE_STAT_NAMES, LIMITS, type Move, type Project, STATUS_KINDS, WEATHER_KINDS, type WeatherKind, maxHp } from "./project";
 
 export interface Mon { species: string; level: number; hp: number; exp: number; moves: string[]; /** objeto equipado (id); se consume si es de un solo uso */ held?: string; /** 0 = sano; 1…5 = índice+1 en STATUS_KINDS (persiste entre combates). */ status?: number }
@@ -219,7 +220,7 @@ export class Battle {
       const sp = speciesNow.get(`${side}${i}`) ?? m.species;
       return this.p.species.find((s) => s.id === sp)?.name ?? sp;
     };
-    const foeName = (i: number) => name(1, i) + (this.isTrainer ? " rival" : " salvaje");
+    const foeName = (i: number) => (this.isTrainer ? t("{0} rival", name(1, i)) : t("{0} salvaje", name(1, i)));
     const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
     const mvName = (id: number) => this.p.moves[id]?.name ?? "?";
     const itemName = (i: number) => this.p.items[i]?.name ?? "objeto";
@@ -233,100 +234,102 @@ export class Battle {
       const slotName = (side: number, slot: number) => { const e = (side === 0 ? snap.p : snap.f)[slot]; return e ? (side === 0 ? name(0, e.i) : foeName(e.i)) : "?"; };
       const push = (text: string, sfx?: BattleEvent["sfx"], target?: BattleEvent["target"]) => out.push({ text, snap, sfx, target });
       switch (kind) {
-        case E.use: { const who = a === 0 ? name(0, b) : foeName(b); push(`${cap(who)} usa ${mvName(c)}.`); break; }
-        case E.miss: push("¡Pero falló!", "miss"); break;
+        case E.use: { const who = a === 0 ? name(0, b) : foeName(b); push(t("{0} usa {1}.", cap(who), mvName(c))); break; }
+        case E.miss: push(t("¡Pero falló!"), "miss"); break;
         case E.hit: {
           const eff = d & 0xffff, crit = (d >> 16) > 0;
-          push(crit ? "¡Golpe crítico!" : eff === 0 ? "No afecta..." : eff > 100 ? "¡Es muy eficaz!" : eff < 100 ? "No es muy eficaz..." : `${c} de daño.`,
+          push(crit ? t("¡Golpe crítico!") : eff === 0 ? t("No afecta...") : eff > 100 ? t("¡Es muy eficaz!") : eff < 100 ? t("No es muy eficaz...") : t("{0} de daño.", c),
             eff === 0 ? undefined : eff > 100 ? "super" : eff < 100 ? "weak" : "hit", { side: a === 0 ? "p" : "f", slot: b });
           break;
         }
-        case E.faint: push(a === 1 ? `¡${cap(foeName(c))} se debilitó!` : `¡${name(0, c)} se debilitó!`, "faint", { side: a === 0 ? "p" : "f", slot: b }); break;
-        case E.exp: push(`${name(0, a)} gana ${b} puntos de experiencia.`); break;
-        case E.level: push(`¡${name(0, a)} sube al nivel ${b}!`, "levelup"); break;
-        case E.learn: push(`¡${name(0, a)} aprende ${mvName(b)}!`, "levelup"); break;
+        case E.faint: push(a === 1 ? t("¡{0} se debilitó!", cap(foeName(c))) : t("¡{0} se debilitó!", name(0, c)), "faint", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.exp: push(t("{0} gana {1} puntos de experiencia.", name(0, a), b)); break;
+        case E.level: push(t("¡{0} sube al nivel {1}!", name(0, a), b), "levelup"); break;
+        case E.learn: push(t("¡{0} aprende {1}!", name(0, a), mvName(b)), "levelup"); break;
         case E.evolve: {
           const old = this.p.species[b]?.name ?? "?";
           speciesNow.set(`0${a}`, this.p.species[c]?.id ?? "");
-          push(`¡${old} evoluciona en ${this.p.species[c]?.name ?? "?"}!`, "levelup");
+          push(t("¡{0} evoluciona en {1}!", old, this.p.species[c]?.name ?? "?"), "levelup");
           break;
         }
-        case E.sendout: push(`${this.opts.trainer} envía a ${name(1, a)}.`); break;
-        case E.out: push(`¡Vuelve, ${name(0, a)}!`); break;
-        case E.in: case E.forceIn: push(`¡Adelante, ${name(0, a)}!`); break;
+        case E.sendout: push(t("{0} envía a {1}.", this.opts.trainer ?? "", name(1, a))); break;
+        case E.out: push(t("¡Vuelve, {0}!", name(0, a))); break;
+        case E.in: case E.forceIn: push(t("¡Adelante, {0}!", name(0, a))); break;
         case E.heal: {
           const id = this.p.items[c]?.id;
           if (id) this.opts.inv[id] = (this.opts.inv[id] ?? 1) - 1;
-          push(`${name(0, a)} recupera ${b} PS con ${itemName(c)}.`, "heal");
+          push(t("{0} recupera {1} PS con {2}.", name(0, a), b, itemName(c)), "heal");
           break;
         }
-        case E.noitem: push("¡No te quedan!"); break;
-        case E.throw: { const id = this.p.items[c]?.id; if (id) this.opts.inv[id] = (this.opts.inv[id] ?? 1) - 1; push(`¡Lanzas una ${itemName(c).toLowerCase()}!`); break; }
+        case E.noitem: push(t("¡No te quedan!")); break;
+        case E.throw: { const id = this.p.items[c]?.id; if (id) this.opts.inv[id] = (this.opts.inv[id] ?? 1) - 1; push(t("¡Lanzas una {0}!", itemName(c).toLowerCase())); break; }
         case E.catch: {
-          push(`¡${name(1, a)} fue capturado!`, "catch");
-          if (this.party.length < 6) this.party.push(this.foes[a]); else push("Tu equipo está lleno: se envía a la caja.");
+          push(t("¡{0} fue capturado!", name(1, a)), "catch");
+          if (this.party.length < 6) this.party.push(this.foes[a]); else push(t("Tu equipo está lleno: se envía a la caja."));
           break;
         }
-        case E.ballFail: push("¡Se escapó de la bola!"); break;
-        case E.runOk: push("¡Escapaste sin problemas!"); break;
-        case E.runFail: push("¡No pudiste escapar!"); break;
-        case E.noRun: push("¡No puedes huir de un combate de entrenador!"); break;
-        case E.noCatch: push("¡No puedes capturar aquí!"); break;
+        case E.ballFail: push(t("¡Se escapó de la bola!")); break;
+        case E.runOk: push(t("¡Escapaste sin problemas!")); break;
+        case E.runFail: push(t("¡No pudiste escapar!")); break;
+        case E.noRun: push(t("¡No puedes huir de un combate de entrenador!")); break;
+        case E.noCatch: push(t("¡No puedes capturar aquí!")); break;
         case E.status: {
           const kindName = STATUS_KINDS[c - 1];
-          const msg = { burn: "se quemó", poison: "fue envenenado", paralysis: "quedó paralizado", sleep: "se durmió", freeze: "fue congelado" }[kindName] ?? "sufre un estado";
-          push(`¡${cap(a === 0 ? name(0, d) : foeName(d))} ${msg}!`, "weak", { side: a === 0 ? "p" : "f", slot: b });
+          const who = cap(a === 0 ? name(0, d) : foeName(d));
+          const msg = { burn: t("¡{0} se quemó!", who), poison: t("¡{0} fue envenenado!", who), paralysis: t("¡{0} quedó paralizado!", who), sleep: t("¡{0} se durmió!", who), freeze: t("¡{0} fue congelado!", who) }[kindName] ?? t("¡{0} sufre un estado!", who);
+          push(msg, "weak", { side: a === 0 ? "p" : "f", slot: b });
           break;
         }
         case E.stage: {
-          const st = BATTLE_STAT_NAMES[BATTLE_STATS[c]];
+          const st = t(BATTLE_STAT_NAMES[BATTLE_STATS[c]]);
           const who = slotName(a, b);
-          push(d === 0 ? `¡${st} de ${who} no puede cambiar más!` : `¡${st} de ${who} ${d > 0 ? "sube" : "baja"}${Math.abs(d) >= 2 ? " mucho" : ""}!`, d > 0 ? "levelup" : d < 0 ? "weak" : undefined);
+          push(d === 0 ? t("¡{0} de {1} no puede cambiar más!", st, who)
+            : d > 0 ? (Math.abs(d) >= 2 ? t("¡{0} de {1} sube mucho!", st, who) : t("¡{0} de {1} sube!", st, who))
+            : (Math.abs(d) >= 2 ? t("¡{0} de {1} baja mucho!", st, who) : t("¡{0} de {1} baja!", st, who)), d > 0 ? "levelup" : d < 0 ? "weak" : undefined);
           break;
         }
-        case E.cant: push(`¡${cap(slotName(a, b))} ${c === 4 ? "está profundamente dormido" : c === 5 ? "está congelado" : "está paralizado: no puede moverse"}!`); break;
-        case E.wake: push(`¡${cap(slotName(a, b))} se despertó!`); break;
-        case E.thaw: push(`¡${cap(slotName(a, b))} se descongeló!`); break;
-        case E.chip: push(`${cap(slotName(a, b))} sufre ${d === 1 ? "por la quemadura" : "por el veneno"}.`, "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
-        case E.drain: push(`${cap(slotName(a, b))} drena ${c} PS.`, "heal"); break;
-        case E.recoil: push(`${cap(slotName(a, b))} recibe daño de retroceso.`, "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
-        case E.selfHeal: push(`${cap(slotName(a, b))} recupera ${c} PS.`, "heal"); break;
-        case E.ability: push(`¡${abName(c)} de ${slotName(a, b)} se activa!`); break;
-        case E.immune: push(`${cap(slotName(a, b))} es inmune gracias a ${abName(c)}.`, "weak"); break;
-        case E.absorb: push(`¡${abName(d)} de ${slotName(a, b)} absorbe el ataque y recupera ${c} PS!`, "heal"); break;
+        case E.cant: push(c === 4 ? t("¡{0} está profundamente dormido!", cap(slotName(a, b))) : c === 5 ? t("¡{0} está congelado!", cap(slotName(a, b))) : t("¡{0} está paralizado: no puede moverse!", cap(slotName(a, b)))); break;
+        case E.wake: push(t("¡{0} se despertó!", cap(slotName(a, b)))); break;
+        case E.thaw: push(t("¡{0} se descongeló!", cap(slotName(a, b)))); break;
+        case E.chip: push(d === 1 ? t("{0} sufre por la quemadura.", cap(slotName(a, b))) : t("{0} sufre por el veneno.", cap(slotName(a, b))), "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.drain: push(t("{0} drena {1} PS.", cap(slotName(a, b)), c), "heal"); break;
+        case E.recoil: push(t("{0} recibe daño de retroceso.", cap(slotName(a, b))), "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.selfHeal: push(t("{0} recupera {1} PS.", cap(slotName(a, b)), c), "heal"); break;
+        case E.ability: push(t("¡{0} de {1} se activa!", abName(c), slotName(a, b))); break;
+        case E.immune: push(t("{0} es inmune gracias a {1}.", cap(slotName(a, b)), abName(c)), "weak"); break;
+        case E.absorb: push(t("¡{0} de {1} absorbe el ataque y recupera {2} PS!", abName(d), slotName(a, b), c), "heal"); break;
         case E.cure: {
           const id = this.p.items[b]?.id;
           if (id) this.opts.inv[id] = (this.opts.inv[id] ?? 1) - 1;
-          push(`${name(0, a)} se cura del estado alterado con ${itemName(b)}.`, "heal");
+          push(t("{0} se cura del estado alterado con {1}.", name(0, a), itemName(b)), "heal");
           break;
         }
-        case E.noEffect: push("No tendría ningún efecto."); break;
-        case E.charge: push(`¡${cap(slotName(a, b))} acumula energía!`); break;
-        case E.recharge: push(`¡${cap(slotName(a, b))} debe recuperarse!`); break;
+        case E.noEffect: push(t("No tendría ningún efecto.")); break;
+        case E.charge: push(t("¡{0} acumula energía!", cap(slotName(a, b)))); break;
+        case E.recharge: push(t("¡{0} debe recuperarse!", cap(slotName(a, b)))); break;
         case E.form: {
           if (a === 0) this.formUsed = true;
-          push(`¡${cap(slotName(a, b))} se transforma${d >= 0 ? ` y adquiere el tipo ${this.p.types[d] ?? "?"}` : ""}!`, "levelup");
+          push(d >= 0 ? t("¡{0} se transforma y adquiere el tipo {1}!", cap(slotName(a, b)), this.p.types[d] ?? "?") : t("¡{0} se transforma!", cap(slotName(a, b))), "levelup");
           break;
         }
-        case E.protect: push(`¡${cap(slotName(a, b))} se protege!`); break;
-        case E.protected: push(`¡${cap(slotName(a, b))} se ha protegido del ataque!`, "weak"); break;
-        case E.flinch: push(`¡${cap(slotName(a, b))} se amedrenta y no puede moverse!`); break;
-        case E.trap: push(`¡${cap(slotName(a, b))} queda atrapado!`); break;
-        case E.trapChip: push(`${cap(slotName(a, b))} sufre por estar atrapado.`, "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
-        case E.trapEnd: push(`${cap(slotName(a, b))} se libera.`); break;
-        case E.trapped: push(`¡${cap(slotName(a, b))} no puede escapar, está atrapado!`); break;
-        case E.phaze: push(c < 0 ? `¡${cap(slotName(a, b))} huye despavorido!` : `¡${cap(slotName(a, b))} es obligado a retirarse!`); break;
-        case E.multi: push(`¡Golpeó ${c} veces!`); break;
-        case E.weather: push({ sun: "¡El sol brilla con fuerza!", rain: "¡Empieza a llover!", sand: "¡Se levanta una tormenta de arena!", hail: "¡Empieza a granizar!" }[WEATHER_KINDS[c - 1]] ?? "El clima cambia."); break;
-        case E.weatherEnd: push({ sun: "El sol vuelve a la normalidad.", rain: "La lluvia cesa.", sand: "La tormenta de arena amaina.", hail: "El granizo cesa." }[WEATHER_KINDS[c - 1]] ?? "El clima se calma."); break;
-        case E.weatherChip: push(`${cap(slotName(a, b))} sufre por ${d === 3 ? "la tormenta de arena" : "el granizo"}.`, "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
-        case E.terrain: push(`Un terreno de tipo ${this.p.types[c] ?? "?"} cubre el campo.`); break;
-        case E.terrainEnd: push(`El terreno de tipo ${this.p.types[c] ?? "?"} desaparece.`); break;
+        case E.protect: push(t("¡{0} se protege!", cap(slotName(a, b)))); break;
+        case E.protected: push(t("¡{0} se ha protegido del ataque!", cap(slotName(a, b))), "weak"); break;
+        case E.flinch: push(t("¡{0} se amedrenta y no puede moverse!", cap(slotName(a, b)))); break;
+        case E.trap: push(t("¡{0} queda atrapado!", cap(slotName(a, b)))); break;
+        case E.trapChip: push(t("{0} sufre por estar atrapado.", cap(slotName(a, b))), "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.trapEnd: push(t("{0} se libera.", cap(slotName(a, b)))); break;
+        case E.trapped: push(t("¡{0} no puede escapar, está atrapado!", cap(slotName(a, b)))); break;
+        case E.phaze: push(c < 0 ? t("¡{0} huye despavorido!", cap(slotName(a, b))) : t("¡{0} es obligado a retirarse!", cap(slotName(a, b)))); break;
+        case E.multi: push(t("¡Golpeó {0} veces!", c)); break;
+        case E.weather: push({ sun: t("¡El sol brilla con fuerza!"), rain: t("¡Empieza a llover!"), sand: t("¡Se levanta una tormenta de arena!"), hail: t("¡Empieza a granizar!") }[WEATHER_KINDS[c - 1]] ?? t("El clima cambia.")); break;
+        case E.weatherEnd: push({ sun: t("El sol vuelve a la normalidad."), rain: t("La lluvia cesa."), sand: t("La tormenta de arena amaina."), hail: t("El granizo cesa.") }[WEATHER_KINDS[c - 1]] ?? t("El clima se calma.")); break;
+        case E.weatherChip: push(d === 3 ? t("{0} sufre por la tormenta de arena.", cap(slotName(a, b))) : t("{0} sufre por el granizo.", cap(slotName(a, b))), "hit", { side: a === 0 ? "p" : "f", slot: b }); break;
+        case E.terrain: push(t("Un terreno de tipo {0} cubre el campo.", this.p.types[c] ?? "?")); break;
+        case E.terrainEnd: push(t("El terreno de tipo {0} desaparece.", this.p.types[c] ?? "?")); break;
         case E.held: {
-          const h = this.heldList[c], amt = d & 0xffff, used = (d >> 16) > 0, who = cap(slotName(a, b));
-          const it = h?.name ?? "su objeto";
-          push(h?.kind === "leftovers" ? `${who} recupera ${amt} PS con ${it}.` : h?.kind === "berry" ? `¡${who} se come ${it} y recupera ${amt} PS!` : h?.kind === "cureBerry" ? `¡${who} se come ${it} y se cura!` : h?.kind === "focus" ? `¡${who} aguanta el golpe gracias a ${it}!` : `${who} usa ${it}.`, h?.kind === "focus" ? "weak" : "heal");
-          void used;
+          const h = this.heldList[c], amt = d & 0xffff, who = cap(slotName(a, b));
+          const it = h?.name ?? t("su objeto");
+          push(h?.kind === "leftovers" ? t("{0} recupera {1} PS con {2}.", who, amt, it) : h?.kind === "berry" ? t("¡{0} se come {1} y recupera {2} PS!", who, it, amt) : h?.kind === "cureBerry" ? t("¡{0} se come {1} y se cura!", who, it) : h?.kind === "focus" ? t("¡{0} aguanta el golpe gracias a {1}!", who, it) : t("{0} usa {1}.", who, it), h?.kind === "focus" ? "weak" : "heal");
           break;
         }
       }

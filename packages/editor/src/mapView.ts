@@ -7,6 +7,7 @@ import { type GameMap, type Npc, type Project, decodeTiles, encodeTiles, uniqueI
 import { createRenderer, type Renderer } from "./renderer";
 import { MAX_INSTANCES } from "./renderer/types";
 import { type Cam3D, type Entity3D, Renderer3D } from "./renderer3d";
+import { reducedMotion } from "./a11y";
 import { ANIM_MS, ERASE_OBJECT, NPC_SPRITE, OBJECT_MIN, PLAYER_SPRITE, TILE, TILE_ANIM, TILE_DEFS, TILE_HEIGHT, atlasIndex } from "./tiles";
 import { runBattleUi } from "./ui/battleUi";
 
@@ -538,7 +539,7 @@ export class MapView {
     const tiles = e.tiles;
     let n = 0;
     const put = (x: number, y: number, idx: number) => { const o = n++ * 4; this.inst[o] = x; this.inst[o + 1] = y; this.inst[o + 2] = idx; this.inst[o + 3] = 0; };
-    const frame = Math.floor(performance.now() / ANIM_MS) % 2;
+    const frame = reducedMotion() ? 0 : Math.floor(performance.now() / ANIM_MS) % 2;
     for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
       const g = tiles[y * w + x];
       put(x * TILE, y * TILE, frame && TILE_ANIM[g] !== undefined ? TILE_ANIM[g] : atlasIndex(g));

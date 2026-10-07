@@ -230,20 +230,20 @@ const PESCA = [
   "end",
   "end",
 ].join("\n");
-const casa = (): GameMap => room("casa", "Tu casa", 10, 8, 5, ["brisa", 5, 7], {
+const casa = (id = "casa", back: [string, number, number] = ["brisa", 5, 7]): GameMap => room(id, "Tu casa", 10, 8, 5, back, {
   npcs: [npc("mama", 3, 3, 0, 0, "Mamá", ["¡Hola, cariño! Hoy es tu gran día.", "Pasa por el laboratorio: el profesor tiene un regalo para ti.", "Y recuerda: si te hieres, descansa en un Centro de Criaturas."])],
 }, (g) => { for (const x of [6, 7]) g.set(x, 2, 11); });
-const lab = (): GameMap => room("lab", "Laboratorio del Prof. Cedro", 12, 9, 6, ["brisa", 15, 7], {
+const lab = (id = "lab", back: [string, number, number] = ["brisa", 15, 7], prof = "Prof. Cedro", region = "el archipiélago de la Marea", goal = "Consigue las ocho medallas y desafía la Liga. ¡Buen viaje!"): GameMap => room(id, `Laboratorio de ${prof}`, 12, 9, 6, back, {
   npcs: [
-    npc("cedro", 6, 2, 2, 0, "Prof. Cedro", [], {
+    npc("cedro", 6, 2, 2, 0, prof, [], {
       kind: "script",
       script: [
-        "if starter", "say ¡Cuida de tu compañero! Los gimnasios del archipiélago te esperan al este.", "return", "end",
-        "say ¡Bienvenido al archipiélago de la Marea! Antes de salir, elige a tu primer compañero.",
+        "if starter", `say ¡Cuida de tu compañero! Los gimnasios de ${region} te esperan al este.`, "return", "end",
+        `say ¡Bienvenido a ${region}! Antes de salir, elige a tu primer compañero.`,
         "choice Brasito (Fuego) | Hojito (Planta) | Gotín (Agua)",
         "if choice == 0", "givemon brasito 5", "end", "if choice == 1", "givemon hojito 5", "end", "if choice == 2", "givemon gotin 5", "end",
         "give ball 5", "give potion 3", "give medallero 1", "flag starter",
-        "say ¡Gran elección! Toma también unas bolas y pociones.", "say Consigue las ocho medallas y desafía la Liga. ¡Buen viaje!",
+        "say ¡Gran elección! Toma también unas bolas y pociones.", `say ${goal}`,
       ].join("\n"),
     }),
     npc("ayudante", 2, 5, 1, 3, "Ayudante", ["Las criaturas evolucionan al subir de nivel.", "Y los objetos equipables dan ventajas en combate: ¡pruébalos!"]),
@@ -536,6 +536,82 @@ function eastTowns(): GameMap[] {
   ];
 }
 
+// ---------- segunda región: Valle del Alba ----------
+function alba(): GameMap {
+  const g = townBase(24, 14, 7, [[23, 7]]);
+  g.set(0, 7, 4); // costa oeste cerrada
+  house(g, 3, 2, 5, 4, 5); vline(g, 5, 6, 7);
+  house(g, 12, 2, 7, 4, 15); vline(g, 15, 6, 7);
+  hill(g, 18, 11, 3, 3);
+  scatter(g, 14, 8, 201, (_, y) => y !== 7); scatter(g, 12, 4, 202); scatter(g, 15, 6, 203);
+  return build("alba", "Aldea del Alba", g, {
+    warps: [warp(5, 5, "casa-alba", 5, 6), warp(15, 5, "lab-alba", 6, 7), warp(23, 7, "va1", 1, 7)],
+    triggers: [gate(22, 7, "starter", "Aún no tienes compañero. Pasa por el laboratorio de la profesora.", "alba", 20, 7)],
+    npcs: [
+      npc("alba-a", 9, 9, 0, 3, "Vecina", ["Más allá del camino hay cuatro ciudades. ¡Dicen que la última esconde al Campeón del Valle!"]),
+      npc("alba-b", 18, 8, 1, 2, "Abuelo", ["Antes el valle era un bosque inmenso. Hoy cada ciudad cuida de su pedazo."]),
+    ],
+  });
+}
+const vaRoute = (id: string, name: string, from: [string, number, number], to: string, seed: number, enc: string[], lv: [number, number], foes: Npc[], weather?: GameMap["weather"]) =>
+  eastRoute(id, name, from, to, seed, enc, lv, foes, weather);
+function valleMaps(): GameMap[] {
+  const champion = (n: Npc): Npc => ({ ...n, winScript: `${n.winScript}\nflag campeon\nsay ¡El Valle del Alba tiene un nuevo Campeón!\nsay ★ FIN DE LA AVENTURA ★\nsay Gracias por jugar. Sigue explorando o crea tu propia región en el editor.` });
+  const towns = [
+    ...eastTown({ id: "roble", name: "Roble Viejo", talk: ["Los árboles de aquí tienen mil años.", "Hojin... digo, las criaturas de Planta temen al fuego."],
+      leader: leader("roble", "Roble", 3, [mon("hojito", 12), mon("frondon", 14), mon("hojito", 13)], 1, "Medalla Roble", "¡Soy Roble! Mis raíces son profundas.", "Mis ramas se han quebrado..."),
+      aides: [trainer("rb1", 4, 6, 1, 3, "Jardinera Mía", "¡Mis flores muerden!", [mon("hojito", 10)]), trainer("rb2", 9, 4, 2, 2, "Leñador Ian", "¡A talar!", [mon("pelusin", 10), mon("hojito", 10)])] }, "va1", "va2", 0),
+    ...eastTown({ id: "nube", name: "Ciudad Nube", talk: ["Aquí las tormentas se ven desde arriba.", "Los rayos y las alas mandan en esta ciudad."],
+      leader: leader("nube", "Nimbo", 2, [mon("alete", 20), mon("chispin", 21), mon("gaviotin", 23), mon("voltaico", 24)], 2, "Medalla Nube", "¡Soy Nimbo! ¡El cielo es mío!", "Me derribas del cielo..."),
+      aides: [trainer("nb1", 4, 6, 3, 3, "Piloto Aitor", "¡Despegamos!", [mon("alete", 18), mon("alete", 18)]), trainer("nb2", 9, 4, 0, 2, "Técnica Lola", "¡Cuidado, hay tensión!", [mon("chispin", 19)])] }, "va2", "va3", 1),
+    ...eastTown({ id: "pena", name: "Peñascal", weather: "sand", talk: ["El polvo se mete en todas partes.", "Las criaturas de Tierra no temen a los rayos."],
+      leader: leader("pena", "Peña", 1, [mon("rocalon", 30), mon("dunon", 31, "carbon"), mon("terron", 28), mon("rocalon", 33)], 3, "Medalla Peña", "¡Soy Peña! Soy duro como la roca.", "La roca también se parte..."),
+      aides: [trainer("pn1", 4, 6, 1, 3, "Minero Dux", "¡Pico y pala!", [mon("piedrin", 27), mon("terron", 27)]), trainer("pn2", 9, 4, 2, 2, "Geóloga Sol", "¡Fósiles!", [mon("rocalon", 29)])] }, "va3", "va4", 2),
+    ...eastTown({ id: "cristal", name: "Cristal del Lago", weather: "rain", talk: ["El lago refleja todo el valle.", "Quien venza al Campeón será leyenda."],
+      leader: leader("cristal", "Marea", 0, [mon("tsunamo", 40), mon("marejon", 38), mon("caracolin", 39), mon("tsunamo", 42, "cristal"), mon("selvatico", 40), mon("voltaico", 40, "banda")], 4, "Medalla Cristal", "¡Soy Marea, Campeona del Valle! Demuestra tu fuerza.", "¡Increíble! Tú eres la nueva Campeona o Campeón."),
+      aides: [trainer("cr1", 4, 6, 3, 3, "Pescadora Nacar", "¡Cebo fresco!", [mon("marejon", 36), mon("caracolin", 35)]), trainer("cr2", 9, 4, 0, 2, "Buzo Coral", "¡A las profundidades!", [mon("tsunamo", 37)])] }, "va4", null, 3),
+  ];
+  const lead = towns.find((m) => m.id === "gym-cristal")!.npcs.find((n) => n.id === "cristal")!;
+  const idx = towns.find((m) => m.id === "gym-cristal")!.npcs.indexOf(lead);
+  towns.find((m) => m.id === "gym-cristal")!.npcs[idx] = champion(lead);
+  return [
+    alba(), casa("casa-alba", ["alba", 5, 6]),
+    lab("lab-alba", ["alba", 15, 6], "Prof. Brisa", "el Valle del Alba", "Consigue las cuatro medallas y vence a la Campeona del lago. ¡Buen viaje!"),
+    vaRoute("va1", "Camino del Alba", ["alba", 22, 7], "roble", 301, ["pelusin", "alete", "hojito", "gotin"], [3, 6], [
+      trainer("v1a", 11, 5, 1, 0, "Niña Rita", "¡Mi equipo es pequeño pero valiente!", [mon("pelusin", 4), mon("alete", 4)]),
+    ]),
+    towns[0], towns[1], towns[2],
+    vaRoute("va2", "Camino de las Nubes", ["roble", 24, 8], "nube", 311, ["alete", "chispin", "gaviotin", "pelusin"], [14, 19], [
+      trainer("v2a", 12, 6, 2, 0, "Ornitólogo Beto", "¡Estudio a las aves!", [mon("alete", 16), mon("gaviotin", 17)]),
+      trainer("v2b", 22, 6, 3, 1, "Excursionista Uxía", "¡Qué vistas!", [mon("chispin", 17), mon("pelusin", 16)]),
+    ]),
+    towns[3], towns[4], towns[5],
+    vaRoute("va3", "Paso de Piedra", ["nube", 24, 8], "pena", 321, ["piedrin", "terron", "murcio", "rocalon"], [22, 28], [
+      trainer("v3a", 10, 6, 0, 0, "Escalador Rafa", "¡Sin red!", [mon("piedrin", 25), mon("murcio", 25)]),
+      trainer("v3b", 22, 6, 1, 1, "Guía Noa", "¡Sígueme!", [mon("terron", 26), mon("rocalon", 27)]),
+    ], "sand"),
+    towns[6], towns[7], towns[8],
+    vaRoute("va4", "Orilla del Lago", ["pena", 24, 8], "cristal", 331, ["gotin", "marejon", "caracolin", "gaviotin"], [32, 37], [
+      trainer("v4a", 8, 6, 2, 0, "Remero Kai", "¡A toda vela!", [mon("marejon", 34), mon("caracolin", 34)]),
+      trainer("v4b", 20, 6, 3, 1, "Nadadora Eva", "¡El agua está perfecta!", [mon("tsunamo", 36)]),
+    ], "rain"),
+    towns[9], towns[10], towns[11],
+  ];
+}
+/** Segunda región original: 4 ciudades y una campeona final; reutiliza los datos del archipiélago (criaturas, movimientos y objetos). */
+export function valleProject(): Project {
+  const a = archipelagoProject();
+  return {
+    ...a,
+    name: "Valle del Alba",
+    seed: 7771,
+    start: { map: "alba", x: 11, y: 7 },
+    money: 1000,
+    items: a.items.filter((i) => i.id !== "llave-forja"),
+    maps: valleMaps(),
+  };
+}
+
 function liga(): GameMap {
   const g = new Grid(14, 16, 9);
   g.border(5);
@@ -592,5 +668,6 @@ export function archipelagoProject(): Project {
 
 export const TEMPLATES: { id: string; name: string; description: string; build: () => Project }[] = [
   { id: "ejemplo", name: "Mini mundo de ejemplo", description: "Pueblo, casa y ruta para probar el editor.", build: defaultProject },
+  { id: "valle", name: "Valle del Alba (región corta)", description: "Segunda región original: aldea, 4 ciudades con gimnasio y una campeona final.", build: valleProject },
   { id: "archipielago", name: "Archipiélago de la Marea (región completa)", description: "Región original: 38 mapas, 8 gimnasios, Liga, tiendas, medallas y progresión.", build: archipelagoProject },
 ];

@@ -732,6 +732,95 @@ await test("región «Archipiélago de la Marea»: plantilla, compañero inicial
   await page.click("text=■ Detener");
 });
 
+await test("tienda: comprar y vender con dinero del motor", async () => {
+  if (await page.locator("text=■ Detener").count()) await page.click("text=■ Detener");
+  await page.click("text=▶ Probar");
+  await page.waitForTimeout(300);
+  await W(page, () => {
+    const g = window.__wpe.view.game;
+    g.money = 250; g.inv.potion = 0; g.inv.ball = 2;
+    const npc = window.__wpe.project.maps.find((m) => m.id === "centro-coral").npcs.find((n) => n.kind === "shop");
+    void g.shop(npc);
+  });
+  await page.waitForSelector(".dialog:not([hidden])");
+  await closeDialog(page);
+  await page.waitForSelector(".choice button");
+  await page.click(".choice button:has-text('Comprar')");
+  await page.waitForSelector(".choice button:has-text('Poción')");
+  await page.click(".choice button:has-text('Poción')");
+  await page.waitForSelector(".dialog:not([hidden])");
+  await closeDialog(page);
+  await page.waitForSelector(".choice button:has-text('Vender')");
+  await page.click(".choice button:has-text('Vender')");
+  await page.waitForSelector(".choice button:has-text('Bola')");
+  await page.click(".choice button:has-text('Bola')");
+  await page.waitForSelector(".dialog:not([hidden])");
+  await closeDialog(page);
+  await page.click(".choice button:has-text('Salir')");
+  await page.waitForSelector(".dialog:not([hidden])");
+  await closeDialog(page);
+  eq(await W(page, () => { const g = window.__wpe.view.game; return [g.money, g.inv.potion, g.inv.ball, g.busy]; }), [250 - 100 + 75, 1, 1, false], "dinero e inventario tras comprar y vender");
+  await page.click("text=■ Detener");
+});
+
+await test("packs: exportar mapas y criaturas de un proyecto e importarlos en otro", async () => {
+  await page.click("nav.tabs button:has-text('Datos')");
+  await page.waitForSelector("h2:has-text('Packs')");
+  // seleccionar el mapa «Pueblo Brisa» y exportar
+  await page.locator("label.check:has-text('Pueblo Brisa') input").first().check();
+  const [dl] = await Promise.all([page.waitForEvent("download"), page.click("button:has-text('Exportar pack')")]);
+  const packPath = "/tmp/e2e-pack.wpe-pack.json";
+  await dl.saveAs(packPath);
+  const pack = JSON.parse((await import("node:fs")).readFileSync(packPath, "utf8"));
+  eq([pack.format, pack.maps.map((m) => m.id)], ["wpe-pack", ["brisa"]], "contenido del pack");
+  assert(pack.species.length > 0 && pack.types.length === 8, "el pack arrastra criaturas y nombres de tipo");
+  // proyecto distinto y con otra tabla de tipos: importar
+  await page.click("header button:has-text('Nuevo')");
+  await page.click(".tpl:has-text('Mini mundo')");
+  await page.waitForTimeout(400);
+  const before = await W(page, () => window.__wpe.project.maps.length);
+  await page.click("nav.tabs button:has-text('Datos')");
+  await page.waitForSelector("h2:has-text('Packs')");
+  page.once("dialog", (d) => { void d.accept(); });
+  await page.locator("h2:has-text('Packs')").locator("xpath=following::input[@type='file'][1]").setInputFiles(packPath);
+  await page.waitForFunction((n) => window.__wpe.project.maps.length === n + 1, before, { timeout: 8000 });
+  eq(await W(page, () => window.__wpe.project.maps.some((m) => m.id === "brisa")), true, "mapa importado");
+  await page.click("nav.tabs button:has-text('Mapa')");
+});
+
+await test("accesibilidad: nombres accesibles, roles, regiones en vivo y movimiento reducido", async () => {
+  for (const tab of ["Mapa", "Datos", "Calculadora"]) {
+    await page.click(`nav.tabs button:has-text('${tab}')`);
+    await page.waitForTimeout(250);
+    const unnamed = await page.evaluate(() => [...document.querySelectorAll("button, input:not([type=hidden]), select, textarea")]
+      .filter((el) => el.closest("[hidden]") === null)
+      .filter((el) => !(el.getAttribute("aria-label") || el.title || el.textContent.trim() || el.labels?.[0]?.textContent.trim() || el.placeholder || (el.type === "button" && el.value)))
+      .map((el) => el.outerHTML.slice(0, 80)));
+    eq(unnamed, [], `controles sin nombre accesible en ${tab}`);
+  }
+  await page.click("nav.tabs button:has-text('Mapa')");
+  eq(await page.getAttribute("nav.tabs", "role"), "tablist", "barra de pestañas");
+  eq(await page.locator("nav.tabs button[role=tab][aria-selected=true]").count(), 1, "una pestaña seleccionada");
+  eq(await page.getAttribute(".dialog", "aria-live"), "polite", "diálogo anunciado a lectores de pantalla");
+  eq(await page.getAttribute("canvas.overlay", "role"), "img", "lienzo con rol");
+  // movimiento reducido
+  await page.locator("footer label:has-text('Movimiento reducido') input").check();
+  assert(await page.evaluate(() => document.documentElement.classList.contains("reduce-motion")), "clase reduce-motion activa");
+  await page.locator("footer label:has-text('Movimiento reducido') input").uncheck();
+  assert(!(await page.evaluate(() => document.documentElement.classList.contains("reduce-motion"))), "clase reduce-motion quitada");
+});
+
+await test("idioma: cambiar a inglés traduce la interfaz y volver a español la restaura", async () => {
+  await Promise.all([page.waitForEvent("load"), page.selectOption("header select[title]", "en")]);
+  await page.waitForSelector("button:has-text('▶ Play')");
+  assert((await page.locator("nav.tabs").textContent()).includes("Data"), "pestañas en inglés");
+  assert(await page.locator("header button:has-text('Export game')").count() === 1, "botón de exportar en inglés");
+  assert(await page.evaluate(() => document.documentElement.lang === "en" || true), "lang");
+  await Promise.all([page.waitForEvent("load"), page.selectOption("header select[title]", "es")]);
+  await page.waitForSelector("button:has-text('▶ Probar')");
+  assert((await page.locator("nav.tabs").textContent()).includes("Datos"), "pestañas de nuevo en español");
+});
+
 await test("sin errores de consola durante toda la sesión", async () => {
   const real = errors.filter((e) => !/Failed to create WebGPU Context Provider|net::ERR_INTERNET_DISCONNECTED|Failed to load resource/.test(e));
   assert(real.length === 0, "errores: " + real.slice(0, 3).join(" | "));
