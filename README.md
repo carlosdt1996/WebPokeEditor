@@ -8,13 +8,14 @@ Creador de **fangames de Pokémon** que corre íntegramente en el navegador, usa
 
 ## Qué hay ya
 - **Editor de mapas** con varios mapas por proyecto: pintar, rellenar, cuentagotas, deshacer/rehacer, zoom/pan, redimensionar, capa de colisiones.
-- **NPCs** (conversación, entrenadores con equipo propio, curanderos) y **saltos entre mapas** (puertas, rutas) con inspector.
-- **Modo Probar**: caminas por el mundo, hablas con NPCs, te ven los entrenadores, hay encuentros en hierba alta y combates por turnos jugables (movimientos, tipos, STAB, críticos, objetos, cambio, huida, captura, experiencia y subida de nivel).
+- **NPCs** (conversación, entrenadores con equipo propio, curanderos y **scripts de eventos**: mensajes, objetos, marcas, condicionales, combates, warps) y **saltos entre mapas** (puertas, rutas) con inspector.
+- **Modo Probar**: caminas por el mundo, hablas con NPCs, te ven los entrenadores, hay encuentros en hierba alta y combates por turnos jugables (movimientos, tipos, STAB, críticos, objetos, cambio, huida, captura, experiencia y subida de nivel, movimientos por nivel y evoluciones).
 - **Modo 3D** (🧊, estilo DS "Diamante/Perla"): terreno con alturas, edificios, árboles y personajes como billboards, cámara inclinada que sigue al jugador y se puede girar (Q/E) y orbitar con el ratón. Requiere WebGPU.
 - **Render WebGPU** (2D instanciado + 3D con depth buffer) con **fallback Canvas 2D** para el modo 2D.
 - **Núcleo Rust → WASM** determinista: movimiento en grid, colisiones, bloqueadores, encuentros, RNG y fórmula de daño.
 - **Editor de datos**: especies, movimientos, equipo inicial, encuentros por mapa, inventario.
 - **Gráficos**: criaturas y arte originales generados por código. Puedes **importar tus propios sprites y tileset** (se quedan en tu navegador/proyecto; ver [aspectos legales](docs/guides/legal-and-assets.md)).
+- **Exportar juego**: un único `.html` autocontenido (motor WASM + datos + player) que se juega sin servidor.
 - Audio sintetizado (SFX y música) con WebAudio.
 - Guardado local automático + **importar/exportar** proyecto (`.wpe.json`, esquema versionado con migraciones).
 
@@ -23,6 +24,7 @@ Creador de **fangames de Pokémon** que corre íntegramente en el navegador, usa
 npm install
 npm run dev      # compila el WASM y levanta Vite
 npm test         # cargo test + vitest
+npm run build && npm run e2e -w packages/editor   # pruebas de navegador (Playwright)
 ```
 Requiere Rust (`rustup target add wasm32-unknown-unknown`) y Node 20+.
 

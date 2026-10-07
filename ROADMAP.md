@@ -17,11 +17,11 @@ Leyenda: `[x]` hecho · `[~]` parcial (MVP) · `[ ]` pendiente
 ## Fase 2 — Jugabilidad base
 - [x] Movimiento del jugador en grid, colisiones, warps
 - [x] Diálogos y menús de combate
-- [~] Eventos por NPC/salto (pendiente: VM de scripts)
+- [x] Eventos por NPC con scripts (pendiente: triggers por casilla y VM en Rust)
 - [x] Modo "Probar" dentro del editor
 
 ## Fase 3 — Datos Pokémon
-- [~] Editor de especies, stats, movimientos, equipo (pendiente: evoluciones, learnsets por nivel, objetos)
+- [~] Editor de especies, stats, movimientos, equipo (evoluciones y learnsets por nivel hechos; pendiente: objetos)
 - [~] Editor de movimientos (pendiente: objetos genéricos)
 - [x] Editor de trainers y encuentros salvajes
 - [~] Importar/exportar proyecto en JSON (pendiente CSV)
@@ -32,13 +32,14 @@ Leyenda: `[x]` hecho · `[~]` parcial (MVP) · `[ ]` pendiente
 - [~] UI de combate (animaciones básicas)
 
 ## Fase 5 — Exportación y comunidad
-- [~] Export: JSON del proyecto; pendiente paquete jugable/PWA
+- [x] Export: proyecto JSON y juego autocontenido `.html` (pendiente PWA)
 - [ ] Export de escritorio (Tauri/Electron) opcional
 - [ ] Sistema de plugins/mods
 - [ ] Compartir proyectos, plantillas y tilesets
 
 ## Fase 6 — Pulido
 - [x] Modo 3D estilo DS (vista)
+- [x] Pruebas E2E en navegador (19)
 - [x] Audio sintetizado (SFX + música)
 - [ ] Rendimiento, accesibilidad, i18n
 - [ ] Documentación de usuario y tutoriales

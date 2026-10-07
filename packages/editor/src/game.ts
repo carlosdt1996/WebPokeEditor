@@ -1,6 +1,7 @@
 /** Reglas de juego en ejecución: NPCs, saltos entre mapas, entrenadores, encuentros y combates. */
 import { sfx } from "./audio";
 import { Battle, type Mon, healAll, makeMon } from "./battle";
+import { type ScriptCtx, parseScript, runScript } from "./script";
 import { type Engine, Ev } from "./engine";
 import type { GameMap, Npc, Project } from "./project";
 
@@ -19,6 +20,7 @@ export class Game {
   party: Mon[];
   inv: { ball: number; potion: number };
   defeated = new Set<string>();
+  flags = new Set<string>();
   mapIndex = 0;
   /** true mientras hay diálogo/combate/transición: el bucle no avanza la simulación. */
   busy = false;
@@ -99,8 +101,25 @@ export class Game {
       } else if (npc.kind === "trainer") {
         if (this.defeated.has(this.key(npc))) await this.host.dialog(npc.name, npc.defeatedLines?.length ? npc.defeatedLines : ["..."]);
         else await this.challenge(npc);
+      } else if (npc.kind === "script") {
+        const r = parseScript(npc.script ?? "");
+        if (r.ok) await runScript(r.code, this.scriptCtx(npc));
+        else this.host.say(`Script de ${npc.name} con errores: ${r.errors[0]}`);
       } else await this.host.dialog(npc.name, npc.lines.length ? npc.lines : ["..."]);
     });
+  }
+
+  private scriptCtx(npc: Npc): ScriptCtx {
+    return {
+      say: (lines) => this.host.dialog(npc.name, lines),
+      give: (item, n) => { this.inv[item] += n; sfx("heal"); this.host.say(`Recibes ${n} × ${item === "ball" ? "bola" : "poción"}.`); },
+      heal: () => { healAll(this.p, this.party); sfx("heal"); },
+      has: (f) => this.flags.has(f),
+      set: (f, on) => { if (on) this.flags.add(f); else this.flags.delete(f); },
+      battle: async (sp, lv) => { await this.fight([makeMon(this.p, sp, lv)]); },
+      givemon: (sp, lv) => { if (this.party.length < 6) { this.party.push(makeMon(this.p, sp, lv)); sfx("catch"); this.host.say("¡Un nuevo compañero se une a tu equipo!"); } },
+      warp: (m, x, y) => this.warpTo(m, x, y),
+    };
   }
 
   private async challenge(n: Npc) {

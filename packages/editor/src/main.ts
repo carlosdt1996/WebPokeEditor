@@ -3,12 +3,15 @@ import { isMuted, setMuted } from "./audio";
 import { h } from "./dom";
 import { Engine } from "./engine";
 import { MapView, type Selection, type Tool } from "./mapView";
+import { SCRIPT_HELP, parseScript } from "./script";
 import { type Npc, type Project, type Warp, defaultProject, loadLocal, parseProject, saveLocal, uniqueId, validate } from "./project";
 import { ATLAS_COLS, ATLAS_ROWS, TILE, TILE_DEFS, atlasFromDataUrl, createAtlas } from "./tiles";
+import { exportGameHtml, runPlayer } from "./player";
 import { battlePanel } from "./ui/battlePanel";
 import { dataPanel } from "./ui/dataPanel";
 
 async function main() {
+  if (window.__WPE_PLAYER__) { await runPlayer(); return; }
   const app = document.getElementById("app")!;
   const engine = await Engine.load(`${import.meta.env.BASE_URL}engine_core.wasm`);
   let project: Project = loadLocal() ?? defaultProject();
@@ -21,14 +24,23 @@ async function main() {
 
   // ---------- Autoguardado ----------
   let timer = 0;
+  let pending = false;
+  const saveNow = () => {
+    clearTimeout(timer);
+    pending = false;
+    view.commit();
+    status.textContent = saveLocal(project) ? "Guardado localmente ✓" : "⚠ No se pudo guardar (¿imágenes muy grandes?). Exporta el proyecto.";
+  };
   const persist = () => {
     clearTimeout(timer);
+    pending = true;
     status.textContent = "Guardando…";
-    timer = window.setTimeout(() => {
-      view.commit();
-      status.textContent = saveLocal(project) ? "Guardado localmente ✓" : "⚠ No se pudo guardar (¿imágenes muy grandes?). Exporta el proyecto.";
-    }, 400);
+    timer = window.setTimeout(saveNow, 400);
   };
+  // no perder la última edición al recargar o cerrar la pestaña
+  const flush = () => { if (pending && !view.playing) saveNow(); };
+  window.addEventListener("pagehide", flush);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
   view.onEdit = () => { persist(); sizeLabel(); };
 
   // ---------- Atlas y paleta ----------
@@ -128,12 +140,21 @@ async function main() {
       inspector.append(
         h("h3", {}, "NPC"),
         field("Nombre", h("input", { type: "text", value: n.name, oninput: (e: Event) => { n.name = (e.target as HTMLInputElement).value; persist(); } })),
-        field("Tipo", sel(n.kind, [["talk", "Conversación"], ["trainer", "Entrenador"], ["healer", "Curandero"]], (v) => { n.kind = v as Npc["kind"]; if (n.kind === "trainer" && !n.team?.length) n.team = [{ species: project.species[0]?.id ?? "", level: 5 }]; })),
+        field("Tipo", sel(n.kind, [["talk", "Conversación"], ["trainer", "Entrenador"], ["healer", "Curandero"], ["script", "Script"]], (v) => { n.kind = v as Npc["kind"]; if (n.kind === "trainer" && !n.team?.length) n.team = [{ species: project.species[0]?.id ?? "", level: 5 }]; })),
         field("Aspecto", sel(n.look, [[0, "Morado"], [1, "Verde"], [2, "Gris"], [3, "Naranja"]], (v) => (n.look = +v))),
         field("Mira hacia", sel(n.dir, [[0, "Abajo"], [1, "Arriba"], [2, "Izquierda"], [3, "Derecha"]], (v) => (n.dir = +v))),
         field("Posición", numIn(n.x, (v) => (n.x = v), 0, engine.width - 1), numIn(n.y, (v) => (n.y = v), 0, engine.height - 1)),
-        field("Diálogo (una línea por mensaje)", lines(n.lines, (a) => (n.lines = a))),
+        ...(n.kind === "script" ? [] : [field("Diálogo (una línea por mensaje)", lines(n.lines, (a) => (n.lines = a)))]),
       );
+      if (n.kind === "script") {
+        const errBox = h("div", { class: "errs" });
+        const check2 = () => { const r = parseScript(n.script ?? ""); errBox.textContent = r.ok ? "✓ Script válido" : r.errors.join("\n"); errBox.classList.toggle("bad", !r.ok); };
+        inspector.append(
+          field("Script (una orden por línea)", h("textarea", { rows: 9, class: "code", spellcheck: false, value: n.script ?? "", oninput: (e: Event) => { n.script = (e.target as HTMLTextAreaElement).value; check2(); persist(); } })),
+          errBox, h("details", {}, h("summary", {}, "Ayuda de órdenes"), h("pre", { class: "help" }, SCRIPT_HELP)),
+        );
+        check2();
+      }
       if (n.kind === "trainer") {
         const team = n.team ?? (n.team = []);
         inspector.append(h("h3", {}, "Equipo del entrenador"),
@@ -229,10 +250,23 @@ async function main() {
     a.click(); URL.revokeObjectURL(a.href);
   };
 
+  const exportGame = async () => {
+    view.commit();
+    const errs = validate(project);
+    if (errs.length && !confirm("El proyecto tiene problemas:\n- " + errs.join("\n- ") + "\n\n¿Exportar igualmente?")) return;
+    try {
+      const blob = await exportGameHtml(project);
+      const a = h("a", { href: URL.createObjectURL(blob), download: `${project.name.replace(/\W+/g, "-") || "juego"}.html` });
+      a.click(); URL.revokeObjectURL(a.href);
+      say(`Juego exportado (${(blob.size / 1024).toFixed(0)} KB): un único .html que funciona sin servidor.`);
+    } catch (e) { alert((e as Error).message); }
+  };
+
   const top = h("header", { class: "top" },
     h("div", { class: "brand" }, "◓ WebPokeEditor"), nameIn,
     h("div", { class: "grow" }), status,
-    h("button", { onclick: () => fileIn.click() }, "Importar"), h("button", { onclick: exportJson }, "Exportar"),
+    h("button", { onclick: () => fileIn.click() }, "Importar"), h("button", { onclick: exportJson, title: "Guarda el proyecto (.wpe.json) para seguir editándolo" }, "Exportar proyecto"),
+    h("button", { onclick: exportGame, title: "Genera un único .html jugable con tu juego" }, "📦 Exportar juego"),
     h("button", { onclick: async () => { if (confirm("¿Crear un proyecto nuevo? Se perderán los cambios no exportados.")) await loadProject(defaultProject()); } }, "Nuevo"),
     muteBtn, btn3d, playBtn, fileIn,
   );

@@ -47,10 +47,17 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
           h("option", { value: "", selected: s.types.length < 2 }, "—"), ...p.types.map((t, i) => h("option", { value: i, selected: s.types[1] === i }, t)))),
         ...STAT_KEYS.map((k) => h("td", {}, num(s.stats[k], (n) => (s.stats[k] = n), 1, 255))),
         h("td", {}, txt(s.moves.join(", "), (v) => (s.moves = v.split(",").map((x) => x.trim()).filter(Boolean)))),
+        h("td", { class: "nw" }, "Nv.", num(s.evolve?.level ?? 0, (n) => { if (n > 0) s.evolve = { level: n, into: s.evolve?.into ?? p.species[0].id }; else delete s.evolve; }, 0, 100),
+          h("select", { onchange: (e: Event) => { const v = (e.target as HTMLSelectElement).value; if (v) s.evolve = { level: s.evolve?.level || 16, into: v }; else delete s.evolve; onChange(); render(); } },
+            h("option", { value: "" }, "no evoluciona"), ...p.species.filter((x) => x !== s).map((x) => h("option", { value: x.id, selected: s.evolve?.into === x.id }, x.name)))),
+        h("td", {}, txt((s.learnset ?? []).map((l) => `${l.level}:${l.move}`).join(", "), (v) => {
+          s.learnset = v.split(",").map((x) => x.trim().split(":")).filter((a) => a.length === 2 && +a[0] > 0 && a[1].trim()).map((a) => ({ level: +a[0], move: a[1].trim() }));
+        })),
         h("td", {}, h("button", { class: "danger", title: "Eliminar", onclick: () => {
           p.species = p.species.filter((x) => x !== s);
           for (const m of p.maps) { m.encounters = m.encounters.filter((e) => e !== s.id); for (const n of m.npcs) n.team = n.team?.filter((t) => t.species !== s.id); }
           p.party = p.party.filter((t) => t.species !== s.id);
+          for (const o of p.species) if (o.evolve?.into === s.id) delete o.evolve;
           onChange(); render();
         } }, "✕")),
       ));
@@ -88,7 +95,7 @@ export function dataPanel(getProject: () => Project, hooks: DataHooks): { el: HT
       h("h2", {}, "Especies"),
       h("p", { class: "muted" }, "Cada especie usa un sprite original generado por código. Con ⬆ puedes importar tu propia imagen (se guarda solo en tu proyecto, nunca se sube a ningún sitio). Los movimientos se referencian por id."),
       h("div", { class: "scroll" }, h("table", {},
-        h("thead", {}, h("tr", {}, ...["Sprite", "Nombre", "Tipo 1", "Tipo 2", "PS", "Ata", "Def", "AtE", "DeE", "Vel", "Movimientos", ""].map((t) => h("th", {}, t)))),
+        h("thead", {}, h("tr", {}, ...["Sprite", "Nombre", "Tipo 1", "Tipo 2", "PS", "Ata", "Def", "AtE", "DeE", "Vel", "Movimientos", "Evolución", "Aprende (nv:mov)", ""].map((t) => h("th", {}, t)))),
         h("tbody", {}, ...spRows))),
       h("button", { onclick: () => { p.species.push({ id: uniqueId(p.species.map((s) => s.id), "nueva"), name: "Nueva", types: [0], stats: { hp: 50, atk: 50, def: 50, spa: 50, spd: 50, spe: 50 }, moves: p.moves[0] ? [p.moves[0].id] : [] }); onChange(); render(); } }, "+ Añadir especie"),
       h("h2", {}, "Movimientos"),

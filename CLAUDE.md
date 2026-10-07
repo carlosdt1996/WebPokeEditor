@@ -16,6 +16,7 @@ Proyecto: editor de fangames de Pokémon en el navegador (Rust→WASM + WebGPU +
 ## Comandos (ver `docs/guides/development-setup.md`)
 - `cargo test --workspace`
 - `npm run wasm` (compila el núcleo), `npm test`, `npm run build`
+- `npm run e2e -w packages/editor` (tras `build`; Playwright + Chromium con WebGPU por software)
 
 ## No hacer
 - No añadir dependencias sin justificarlas en el PR.

@@ -39,6 +39,25 @@ jobs:
         with:
           path: packages/editor/dist
 
+  e2e:
+    # Pruebas de navegador (WebGPU por software). No bloquea el despliegue: avisa si algo se rompe.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run wasm
+      - run: npm run build -w packages/editor
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e -w packages/editor
+
   deploy:
     if: github.event_name != 'pull_request'
     needs: build

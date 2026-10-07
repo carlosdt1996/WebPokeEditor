@@ -164,6 +164,19 @@ export class Battle {
           pl.level++;
           pl.hp += monMaxHp(this.p, pl) - before;
           this.ev(out, `¡${monName(this.p, pl)} sube al nivel ${pl.level}!`, "levelup");
+          const sp = spOf(this.p, pl);
+          for (const l of sp.learnset ?? []) {
+            if (l.level !== pl.level || pl.moves.includes(l.move)) continue;
+            if (pl.moves.length >= 4) pl.moves.shift();
+            pl.moves.push(l.move);
+            this.ev(out, `¡${monName(this.p, pl)} aprende ${this.moveOf(l.move)?.name ?? l.move}!`, "levelup");
+          }
+          if (sp.evolve && pl.level >= sp.evolve.level && this.p.species.some((x) => x.id === sp.evolve!.into)) {
+            const old = monName(this.p, pl), before2 = monMaxHp(this.p, pl);
+            pl.species = sp.evolve.into;
+            pl.hp += monMaxHp(this.p, pl) - before2;
+            this.ev(out, `¡${old} evoluciona en ${monName(this.p, pl)}!`, "levelup");
+          }
         }
       }
       const next = this.foes.findIndex((m, i) => i > this.fi && m.hp > 0);

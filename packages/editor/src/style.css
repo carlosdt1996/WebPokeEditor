@@ -92,3 +92,12 @@ td.spr { white-space: nowrap; } td.spr button { padding: 2px 6px; margin-left: 2
 .menu { position: absolute; right: 0; bottom: 0; height: 28%; width: 45%; background: #2b3350; border-top: 5px solid #333; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px; align-content: start; overflow: auto; }
 .menu button { font-size: 15px; padding: 8px; } .menu button:disabled { opacity: .4; cursor: not-allowed; } .menu .back { grid-column: 1 / -1; }
 @media (max-width: 700px) { .msg { width: 100%; height: 14%; bottom: 28%; border-top: 3px solid #333; } .menu { width: 100%; height: 28%; } }
+.code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+.errs { font-size: 12px; color: #81c784; white-space: pre-wrap; } .errs.bad { color: #ff8a80; }
+.help { font-size: 11px; color: var(--muted); white-space: pre-wrap; margin: 4px 0; }
+td.nw { white-space: nowrap; }
+/* --- Player exportado --- */
+#app.player { display: grid; grid-template-rows: auto 1fr; height: 100%; background: var(--bg); }
+#app.player .stage { position: relative; padding: 0; } #app.player .viewport { border-radius: 0; border: none; }
+.toast { position: absolute; top: 10px; left: 50%; translate: -50% -20px; background: rgba(20,22,32,.92); color: #fff; padding: 6px 14px; border-radius: 99px; font-size: 13px; opacity: 0; transition: .3s; pointer-events: none; z-index: 9; }
+.toast.show { opacity: 1; translate: -50% 0; }

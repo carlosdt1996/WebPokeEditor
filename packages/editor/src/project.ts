@@ -1,4 +1,5 @@
 /** Modelo de datos del proyecto (ver docs/architecture/data-model.md). Todo es dato serializable. */
+import { parseScript } from "./script";
 
 export const SCHEMA_VERSION = 2;
 
@@ -9,10 +10,14 @@ export interface Species {
   id: string; name: string; types: number[]; stats: Stats; moves: string[];
   /** Data URL PNG importado por el usuario (opcional). Nunca se incluye en el repo. */
   sprite?: string;
+  /** Evoluciona al alcanzar `level`. */
+  evolve?: { level: number; into: string };
+  /** Movimientos que aprende al subir de nivel. */
+  learnset?: { level: number; move: string }[];
 }
 export interface Move { id: string; name: string; type: number; category: "physical" | "special"; power: number; accuracy: number }
 
-export type NpcKind = "talk" | "trainer" | "healer";
+export type NpcKind = "talk" | "trainer" | "healer" | "script";
 export interface TeamMember { species: string; level: number }
 export interface Npc {
   id: string; x: number; y: number; look: number; dir: number; kind: NpcKind; name: string;
@@ -20,6 +25,8 @@ export interface Npc {
   /** Solo entrenadores. */
   team?: TeamMember[];
   defeatedLines?: string[];
+  /** Solo kind "script": ver script.ts. */
+  script?: string;
 }
 export interface Warp { x: number; y: number; toMap: string; toX: number; toY: number }
 
@@ -122,6 +129,7 @@ export function defaultProject(): Project {
         npcs: [
           { id: "aldeano", x: 13, y: 9, look: 1, dir: 2, kind: "talk", name: "Aldeano", lines: ["¡Bienvenido a tu aventura!", "Al este está la Ruta 1. Cuidado con la hierba alta."] },
           { id: "pescador", x: 14, y: 7, look: 3, dir: 0, kind: "talk", name: "Pescador", lines: ["El lago está tranquilo hoy...", "A veces pican criaturas muy raras."] },
+          { id: "profesor", x: 9, y: 8, look: 2, dir: 3, kind: "script", name: "Profesor", lines: [], script: "if regalo\nsay Ya tienes mi regalo. ¡Cuídalos bien!\nelse\nsay ¡Hola! Toma, te vendrá bien esto.\ngive potion 3\ngive ball 5\nflag regalo\nsay Y recuerda: si te debilitas, la enfermera te curará.\nend" },
         ],
         encounters: ["pelusin"],
         encounterLevel: [2, 4],
@@ -151,7 +159,8 @@ export function defaultProject(): Project {
       [1, 0.5, 2, 0.5],
     ],
     species: [
-      { id: "flamito", name: "Flamito", types: [1], stats: st(44, 52, 43, 60, 50, 65), moves: ["embestida", "ascua"] },
+      { id: "flamito", name: "Flamito", types: [1], stats: st(44, 52, 43, 60, 50, 65), moves: ["embestida", "ascua"], evolve: { level: 16, into: "flamaron" }, learnset: [{ level: 8, move: "garra" }] },
+      { id: "flamaron", name: "Flamarón", types: [1], stats: st(64, 80, 63, 85, 70, 85), moves: ["embestida", "ascua"], learnset: [{ level: 20, move: "garra" }] },
       { id: "hojin", name: "Hojín", types: [3], stats: st(45, 49, 49, 65, 65, 45), moves: ["embestida", "hojaje"] },
       { id: "aquin", name: "Aquín", types: [2], stats: st(50, 48, 65, 50, 64, 43), moves: ["embestida", "chorro"] },
       { id: "pelusin", name: "Pelusín", types: [0], stats: st(40, 45, 35, 30, 35, 56), moves: ["embestida"] },
@@ -161,6 +170,7 @@ export function defaultProject(): Project {
       { id: "ascua", name: "Ascua", type: 1, category: "special", power: 40, accuracy: 100 },
       { id: "hojaje", name: "Hojaje", type: 3, category: "physical", power: 55, accuracy: 95 },
       { id: "chorro", name: "Chorro", type: 2, category: "special", power: 40, accuracy: 100 },
+      { id: "garra", name: "Garra", type: 0, category: "physical", power: 70, accuracy: 95 },
     ],
   };
 }
@@ -204,6 +214,14 @@ export function validate(p: Project): string[] {
     for (const n of m.npcs) {
       if (n.x >= m.w || n.y >= m.h) errs.push(`${m.name}: NPC "${n.name}" fuera del mapa`);
       for (const t of n.team ?? []) if (!speciesIds.has(t.species)) errs.push(`${m.name}: "${n.name}" usa especie inexistente "${t.species}"`);
+      if (n.kind === "script") {
+        const r = parseScript(n.script ?? "");
+        if (!r.ok) errs.push(...r.errors.map((e) => `${m.name}: script de "${n.name}": ${e}`));
+        else for (const i of r.code) {
+          if ((i.op === "battle" || i.op === "givemon") && !speciesIds.has(i.species)) errs.push(`${m.name}: script de "${n.name}": especie inexistente "${i.species}"`);
+          if (i.op === "warp") { const d = p.maps.find((k) => k.id === i.map); if (!d) errs.push(`${m.name}: script de "${n.name}": mapa inexistente "${i.map}"`); else if (i.x >= d.w || i.y >= d.h) errs.push(`${m.name}: script de "${n.name}": warp fuera del mapa`); }
+        }
+      }
       if (n.kind === "trainer" && !(n.team?.length)) errs.push(`${m.name}: el entrenador "${n.name}" no tiene equipo`);
     }
     for (const w of m.warps) {
@@ -215,6 +233,8 @@ export function validate(p: Project): string[] {
   for (const s of p.species) {
     for (const t of s.types) if (t < 0 || t >= p.types.length) errs.push(`${s.name}: tipo inválido`);
     for (const m of s.moves) if (!moveIds.has(m)) errs.push(`${s.name}: movimiento inexistente "${m}"`);
+    for (const l of s.learnset ?? []) if (!moveIds.has(l.move)) errs.push(`${s.name}: aprende un movimiento inexistente "${l.move}"`);
+    if (s.evolve && !speciesIds.has(s.evolve.into)) errs.push(`${s.name}: evoluciona a una especie inexistente "${s.evolve.into}"`);
   }
   for (const m of p.moves) if (m.type < 0 || m.type >= p.types.length) errs.push(`${m.name}: tipo inválido`);
   if (p.typeChart.length !== p.types.length || p.typeChart.some((r) => r.length !== p.types.length)) errs.push("typeChart no coincide con los tipos");

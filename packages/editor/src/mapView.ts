@@ -60,6 +60,7 @@ export class MapView {
   private project!: Project;
   private editIndex = 0;
   private curIndex = 0;
+  private dt = 1 / 60;
 
   constructor(private engine: Engine) {}
 
@@ -185,7 +186,10 @@ export class MapView {
     this.world3dDirty = true;
     this.gl.style.display = on ? "none" : "";
     if (this.gl3d) this.gl3d.style.display = on ? "" : "none";
-    if (on) { this.cam3.yaw = 0; this.cam3.dist = this.playing ? 13 : this.cam3.dist; }
+    if (on) {
+      this.cam3.yaw = 0;
+      if (this.playing) { const pl = this.engine.player; this.cam3.dist = 13; this.cam3.x = pl.x + 0.5; this.cam3.z = pl.y + 0.5; }
+    }
     return true;
   }
 
@@ -413,6 +417,7 @@ export class MapView {
       }
     }
     if (this.mode3d) {
+      this.dt = dt;
       if (this.keys.has("KeyQ")) this.cam3.yaw -= dt * 1.8;
       if (this.keys.has("KeyE")) this.cam3.yaw += dt * 1.8;
       this.render3d();
@@ -433,7 +438,7 @@ export class MapView {
     const ents: Entity3D[] = this.map.npcs.map((n) => ({ x: n.x, y: n.y, sprite: NPC_SPRITE + (n.look % 4) * 4, dir: this.playing && this.game ? this.game.npcDir(n) : n.dir }));
     if (this.playing) {
       ents.push({ x: pl.x, y: pl.y, sprite: PLAYER_SPRITE, dir: pl.dir });
-      const k = 0.18;
+      const k = 1 - Math.exp(-this.dt * 10);
       this.cam3.x += (pl.x + 0.5 - this.cam3.x) * k;
       this.cam3.z += (pl.y + 0.5 - this.cam3.z) * k;
     } else {
